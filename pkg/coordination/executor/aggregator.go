@@ -3,6 +3,7 @@ package executor
 import (
 	"math"
 	"sort"
+	"time"
 
 	pb "github.com/quidditch/quidditch/pkg/common/proto"
 	"go.uber.org/zap"
@@ -114,21 +115,31 @@ func (qe *QueryExecutor) mergeAggregations(responses []*pb.SearchResponse) map[s
 
 		aggType := aggs[0].Type // Assume all shards return same type
 
+		// Track aggregation merge time
+		mergeStartTime := time.Now()
+		var result *AggregationResult
+
 		switch aggType {
 		case "terms", "histogram", "date_histogram":
-			merged[name] = qe.mergeBucketAggregation(aggs)
+			result = qe.mergeBucketAggregation(aggs)
 		case "stats":
-			merged[name] = qe.mergeStatsAggregation(aggs, false)
+			result = qe.mergeStatsAggregation(aggs, false)
 		case "extended_stats":
-			merged[name] = qe.mergeStatsAggregation(aggs, true)
+			result = qe.mergeStatsAggregation(aggs, true)
 		case "percentiles":
-			merged[name] = qe.mergePercentilesAggregation(aggs)
+			result = qe.mergePercentilesAggregation(aggs)
 		case "cardinality":
-			merged[name] = qe.mergeCardinalityAggregation(aggs)
+			result = qe.mergeCardinalityAggregation(aggs)
 		default:
 			qe.logger.Warn("Unknown aggregation type, skipping merge",
 				zap.String("type", aggType),
 				zap.String("name", name))
+		}
+
+		if result != nil {
+			merged[name] = result
+			// Record merge time
+			aggregationMergeTime.WithLabelValues(aggType).Observe(time.Since(mergeStartTime).Seconds())
 		}
 	}
 

@@ -7,7 +7,71 @@ import (
 	"time"
 
 	pb "github.com/quidditch/quidditch/pkg/common/proto"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"go.uber.org/zap"
+)
+
+// Prometheus metrics for distributed query monitoring
+var (
+	// distributedSearchLatency tracks overall distributed search query latency
+	distributedSearchLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "quidditch_distributed_search_latency_seconds",
+			Help:    "Distributed search query latency in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 12), // 1ms to ~4s
+		},
+		[]string{"index"},
+	)
+
+	// shardQueryLatency tracks per-shard query latency
+	shardQueryLatency = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "quidditch_shard_query_latency_seconds",
+			Help:    "Per-shard query latency in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.001, 2, 12), // 1ms to ~4s
+		},
+		[]string{"index", "shard_id", "node_id"},
+	)
+
+	// shardQueryFailures tracks shard query failures
+	shardQueryFailures = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "quidditch_shard_query_failures_total",
+			Help: "Total number of shard query failures",
+		},
+		[]string{"index", "shard_id", "node_id", "error_type"},
+	)
+
+	// aggregationMergeTime tracks aggregation merge duration
+	aggregationMergeTime = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "quidditch_aggregation_merge_seconds",
+			Help:    "Aggregation merge time in seconds",
+			Buckets: prometheus.ExponentialBuckets(0.0001, 2, 12), // 0.1ms to ~400ms
+		},
+		[]string{"aggregation_type"},
+	)
+
+	// distributedSearchHitsTotal tracks total hits returned
+	distributedSearchHitsTotal = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "quidditch_distributed_search_hits_total",
+			Help:    "Total hits returned by distributed search",
+			Buckets: prometheus.ExponentialBuckets(1, 2, 20), // 1 to ~1M
+		},
+		[]string{"index"},
+	)
+
+	// distributedSearchShardsQueried tracks number of shards queried
+	distributedSearchShardsQueried = promauto.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Name:    "quidditch_distributed_search_shards_queried",
+			Help:    "Number of shards queried in distributed search",
+			Buckets: prometheus.LinearBuckets(1, 1, 20), // 1 to 20 shards
+		},
+		[]string{"index"},
+	)
 )
 
 // DataNodeClient interface for communication with data nodes
@@ -107,6 +171,16 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 		go func(sid int32, nid string) {
 			defer wg.Done()
 
+			// Track per-shard query latency
+			shardStartTime := time.Now()
+			defer func() {
+				shardQueryLatency.WithLabelValues(
+					indexName,
+					fmt.Sprintf("%d", sid),
+					nid,
+				).Observe(time.Since(shardStartTime).Seconds())
+			}()
+
 			// Get data node client
 			qe.mu.RLock()
 			client, exists := qe.dataClients[nid]
@@ -116,6 +190,12 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 				qe.logger.Error("Data node client not found",
 					zap.String("node_id", nid),
 					zap.Int32("shard_id", sid))
+				shardQueryFailures.WithLabelValues(
+					indexName,
+					fmt.Sprintf("%d", sid),
+					nid,
+					"client_not_found",
+				).Inc()
 				resultsChan <- shardResult{
 					shardID: sid,
 					err:     fmt.Errorf("data node %s not found", nid),
@@ -129,6 +209,12 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 					qe.logger.Error("Failed to connect to data node",
 						zap.String("node_id", nid),
 						zap.Error(err))
+					shardQueryFailures.WithLabelValues(
+						indexName,
+						fmt.Sprintf("%d", sid),
+						nid,
+						"connection_failed",
+					).Inc()
 					resultsChan <- shardResult{
 						shardID: sid,
 						err:     fmt.Errorf("failed to connect to node %s: %w", nid, err),
@@ -139,6 +225,14 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 
 			// Execute search on shard
 			resp, err := client.Search(ctx, indexName, sid, query, filterExpression)
+			if err != nil {
+				shardQueryFailures.WithLabelValues(
+					indexName,
+					fmt.Sprintf("%d", sid),
+					nid,
+					"search_failed",
+				).Inc()
+			}
 			resultsChan <- shardResult{
 				shardID:  sid,
 				response: resp,
@@ -179,6 +273,11 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 	// Aggregate results
 	aggregatedResult := qe.aggregateSearchResults(shardResponses, from, size)
 	aggregatedResult.TookMillis = time.Since(startTime).Milliseconds()
+
+	// Record metrics
+	distributedSearchLatency.WithLabelValues(indexName).Observe(time.Since(startTime).Seconds())
+	distributedSearchShardsQueried.WithLabelValues(indexName).Observe(float64(len(shardResponses)))
+	distributedSearchHitsTotal.WithLabelValues(indexName).Observe(float64(aggregatedResult.TotalHits))
 
 	qe.logger.Debug("Search completed",
 		zap.String("index", indexName),
