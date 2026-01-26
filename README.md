@@ -31,7 +31,8 @@ Quidditch is a **distributed, cloud-native search engine** that provides 100% Op
 - Specialized node types (Master, Coordination, Data)
 - Horizontal scalability (10-1000+ nodes)
 - Multi-tier storage (Hot/Warm/Cold/Frozen)
-- Raft-based consensus for cluster state
+- **Dual-mode control plane**: Traditional (Raft) or K8S-native (Operator)
+- Auto-detection of deployment environment
 
 ✅ **Python-First Pipelines**
 - Customize search with Python code
@@ -66,7 +67,9 @@ Quidditch is a **distributed, cloud-native search engine** that provides 100% Op
 │  └────────────────────────────────────────────────────────┘  │
 │                            ↓                                   │
 │  ┌────────────────────────────────────────────────────────┐  │
-│  │              Master Nodes (Raft Consensus)             │  │
+│  │         Control Plane (Dual-Mode Support)              │  │
+│  │   Mode 1: Master Nodes (Raft) - Bare metal/VMs/K8S    │  │
+│  │   Mode 2: K8S Operator - K8S-native with CRDs          │  │
 │  │   • Cluster state    • Shard allocation                │  │
 │  │   • Index metadata   • Node discovery                  │  │
 │  └────────────────────────────────────────────────────────┘  │
@@ -368,21 +371,28 @@ curl -X GET "http://localhost:9200/my-index/_search" \
 - Examples (synonym expansion, ML re-ranking, A/B testing)
 - Testing and deployment
 
-### Master Node Architecture
+### Control Plane Architecture
 
-📖 **[Master Node Architecture](docs/MASTER_NODE_ARCHITECTURE.md)** - Control plane design
+📖 **[Dual-Mode Control Plane](docs/DUAL_MODE_CONTROL_PLANE.md)** - Flexible architecture design ⭐
+- **Support for BOTH traditional (Raft) and K8S-native modes**
+- Pluggable control plane interface
+- Complete implementation for both modes
+- Auto-detection of deployment environment
+- Migration paths between modes
+- Unified configuration format
+
+📖 **[Master Node Architecture](docs/MASTER_NODE_ARCHITECTURE.md)** - Traditional Raft control plane
 - Master node responsibilities and Raft consensus
 - Bandwidth allocation analysis (16 KB/sec total)
 - Traditional deployment patterns
-- Kubernetes deployment options
 - Cost analysis and recommendations
 - **Key finding**: 3 master nodes can handle 1000+ data nodes
 
-📖 **[Kubernetes Deployment Guide](docs/KUBERNETES_DEPLOYMENT_GUIDE.md)** - K8S patterns
+📖 **[Kubernetes Deployment Guide](docs/KUBERNETES_DEPLOYMENT_GUIDE.md)** - K8S deployment patterns
 - Complete manifests (StatefulSets, Deployments, Services)
 - Traditional masters vs K8S-native control plane
 - Production patterns (multi-zone, node selectors, PDBs)
-- Cost analysis ($162/month for 3 masters)
+- Cost analysis ($162/month for 3 masters vs $40/month for operator)
 - Migration strategies and Helm charts
 
 📖 **[K8S-Native Deep Dive](docs/K8S_NATIVE_DEEP_DIVE.md)** - Cloud-native architecture analysis
@@ -391,12 +401,11 @@ curl -X GET "http://localhost:9200/my-index/_search" \
 - Operator pattern as 2026 standard (Vitess, TiDB, Strimzi)
 - Complete CRD and Controller implementation examples
 - Cost/latency/complexity trade-off analysis
-- **Revised Recommendation**: K8S-native for K8S-only deployments; Traditional masters for multi-environment
 
 📖 **[K8S-Native Summary](K8S_NATIVE_SUMMARY.md)** - Quick architectural decision guide
 - Decision framework for choosing control plane architecture
 - Trade-offs comparison (Traditional vs K8S-Native)
-- Hybrid approach for flexibility
+- When to use each mode
 
 ### Diagon Core
 
