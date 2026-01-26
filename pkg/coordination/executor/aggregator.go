@@ -120,7 +120,7 @@ func (qe *QueryExecutor) mergeAggregations(responses []*pb.SearchResponse) map[s
 		var result *AggregationResult
 
 		switch aggType {
-		case "terms", "histogram", "date_histogram", "range":
+		case "terms", "histogram", "date_histogram", "range", "filters":
 			result = qe.mergeBucketAggregation(aggs)
 		case "stats":
 			result = qe.mergeStatsAggregation(aggs, false)
@@ -156,9 +156,12 @@ func (qe *QueryExecutor) mergeBucketAggregation(aggs []*pb.AggregationResult) *A
 
 	aggType := aggs[0].Type
 
-	// For range aggregations, preserve bucket order and metadata
+	// For range and filters aggregations, preserve bucket order and metadata
 	if aggType == "range" {
 		return qe.mergeRangeAggregation(aggs)
+	}
+	if aggType == "filters" {
+		return qe.mergeFiltersAggregation(aggs)
 	}
 
 	// Sum bucket counts across all shards
@@ -246,6 +249,43 @@ func (qe *QueryExecutor) mergeRangeAggregation(aggs []*pb.AggregationResult) *Ag
 
 	return &AggregationResult{
 		Type:    "range",
+		Buckets: buckets,
+	}
+}
+
+// mergeFiltersAggregation merges filters aggregations preserving bucket order
+func (qe *QueryExecutor) mergeFiltersAggregation(aggs []*pb.AggregationResult) *AggregationResult {
+	if len(aggs) == 0 {
+		return nil
+	}
+
+	// Use first shard's buckets as template (preserves order and filter definitions)
+	firstAgg := aggs[0]
+	buckets := make([]*AggregationBucket, len(firstAgg.Buckets))
+
+	// Initialize buckets from first shard
+	for i, bucket := range firstAgg.Buckets {
+		buckets[i] = &AggregationBucket{
+			Key:      bucket.Key,
+			DocCount: bucket.DocCount,
+		}
+	}
+
+	// Sum counts from remaining shards (matching by key)
+	for shardIdx := 1; shardIdx < len(aggs); shardIdx++ {
+		for _, bucket := range aggs[shardIdx].Buckets {
+			// Find matching bucket by key
+			for i, resultBucket := range buckets {
+				if resultBucket.Key == bucket.Key {
+					buckets[i].DocCount += bucket.DocCount
+					break
+				}
+			}
+		}
+	}
+
+	return &AggregationResult{
+		Type:    "filters",
 		Buckets: buckets,
 	}
 }

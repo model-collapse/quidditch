@@ -206,9 +206,9 @@ message SearchHit {
 // Aggregation Messages
 
 message AggregationResult {
-  string type = 1;  // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats, avg, min, max, sum, value_count, range
+  string type = 1;  // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats, avg, min, max, sum, value_count, range, filters
 
-  // Terms aggregation, Range aggregation
+  // Terms aggregation, Range aggregation, Filters aggregation
   repeated AggregationBucket buckets = 2;
 
   // Stats/Extended Stats aggregation

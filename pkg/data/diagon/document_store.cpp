@@ -1481,6 +1481,101 @@ std::vector<DocumentStore::RangeBucket> DocumentStore::aggregateRange(
     return result;
 }
 
+// Filters aggregation (count documents matching multiple filters)
+std::vector<DocumentStore::FilterBucket> DocumentStore::aggregateFilters(
+    const std::vector<FilterSpec>& filters,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    // Initialize result buckets with zero counts
+    std::vector<FilterBucket> result;
+    result.reserve(filters.size());
+
+    for (const auto& filter : filters) {
+        FilterBucket bucket;
+        bucket.key = filter.key;
+        bucket.docCount = 0;
+
+        // Count documents matching this filter
+        for (const auto& docId : docIds) {
+            auto it = documents_.find(docId);
+            if (it == documents_.end()) {
+                continue;
+            }
+
+            bool matches = false;
+
+            try {
+                const json* current = &it->second->data;
+                std::string fieldPath = filter.field;
+
+                // Navigate nested fields
+                size_t dotPos = 0;
+                while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                    std::string key = fieldPath.substr(0, dotPos);
+                    if (current->contains(key) && (*current)[key].is_object()) {
+                        current = &(*current)[key];
+                        fieldPath = fieldPath.substr(dotPos + 1);
+                    } else {
+                        current = nullptr;
+                        break;
+                    }
+                }
+
+                if (!current || !current->contains(fieldPath)) {
+                    // Field doesn't exist - check for "exists" filter type
+                    if (filter.filterType == "exists" || filter.filterType == "missing") {
+                        matches = (filter.filterType == "missing");
+                    }
+                    continue;
+                }
+
+                const json& fieldValue = (*current)[fieldPath];
+
+                // Evaluate filter based on type
+                if (filter.filterType == "term") {
+                    // Exact term match
+                    if (filter.useNumeric && fieldValue.is_number()) {
+                        matches = (fieldValue.get<double>() == filter.numericValue);
+                    } else if (fieldValue.is_string()) {
+                        matches = (fieldValue.get<std::string>() == filter.value);
+                    } else if (fieldValue.is_boolean()) {
+                        matches = (filter.value == "true" && fieldValue.get<bool>()) ||
+                                  (filter.value == "false" && !fieldValue.get<bool>());
+                    }
+                } else if (filter.filterType == "exists") {
+                    // Field exists and is not null
+                    matches = !fieldValue.is_null();
+                } else if (filter.filterType == "missing") {
+                    // Field is null
+                    matches = fieldValue.is_null();
+                } else if (filter.filterType == "match") {
+                    // Simple text match (substring)
+                    if (fieldValue.is_string()) {
+                        std::string str = fieldValue.get<std::string>();
+                        std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+                        std::string searchStr = filter.value;
+                        std::transform(searchStr.begin(), searchStr.end(), searchStr.begin(), ::tolower);
+                        matches = (str.find(searchStr) != std::string::npos);
+                    }
+                }
+
+                if (matches) {
+                    bucket.docCount++;
+                }
+
+            } catch (const std::exception& e) {
+                continue;
+            }
+        }
+
+        result.push_back(bucket);
+    }
+
+    return result;
+}
+
 // Helper: Check if string matches wildcard pattern
 bool DocumentStore::matchWildcard(const std::string& str, const std::string& pattern) const {
     size_t sLen = str.length();

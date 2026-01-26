@@ -956,6 +956,113 @@ SearchResult Shard::searchWithoutFilter(
 
                     result.aggregations[aggName] = aggResult;
                 }
+                else if (aggDef.contains("filters")) {
+                    // Filters aggregation (count documents matching multiple filters)
+                    auto filtersAgg = aggDef["filters"];
+
+                    std::vector<DocumentStore::FilterSpec> filters;
+
+                    // Check if filters is object (named filters) or array (anonymous filters)
+                    if (filtersAgg.contains("filters")) {
+                        auto filtersObj = filtersAgg["filters"];
+
+                        if (filtersObj.is_object()) {
+                            // Named filters: {"errors": {"term": {...}}, "warnings": {...}}
+                            for (auto it = filtersObj.begin(); it != filtersObj.end(); ++it) {
+                                DocumentStore::FilterSpec filterSpec;
+                                filterSpec.key = it.key();
+
+                                const auto& filterDef = it.value();
+
+                                // Parse filter type
+                                if (filterDef.contains("term")) {
+                                    filterSpec.filterType = "term";
+                                    const auto& termFilter = filterDef["term"];
+
+                                    // Get field and value
+                                    for (auto termIt = termFilter.begin(); termIt != termFilter.end(); ++termIt) {
+                                        filterSpec.field = termIt.key();
+
+                                        if (termIt.value().is_number()) {
+                                            filterSpec.numericValue = termIt.value().get<double>();
+                                            filterSpec.useNumeric = true;
+                                        } else if (termIt.value().is_string()) {
+                                            filterSpec.value = termIt.value().get<std::string>();
+                                            filterSpec.useNumeric = false;
+                                        } else if (termIt.value().is_boolean()) {
+                                            filterSpec.value = termIt.value().get<bool>() ? "true" : "false";
+                                            filterSpec.useNumeric = false;
+                                        }
+                                        break;  // Only process first field
+                                    }
+                                } else if (filterDef.contains("match")) {
+                                    filterSpec.filterType = "match";
+                                    const auto& matchFilter = filterDef["match"];
+
+                                    // Get field and value
+                                    for (auto matchIt = matchFilter.begin(); matchIt != matchFilter.end(); ++matchIt) {
+                                        filterSpec.field = matchIt.key();
+                                        filterSpec.value = matchIt.value().get<std::string>();
+                                        filterSpec.useNumeric = false;
+                                        break;
+                                    }
+                                } else if (filterDef.contains("exists")) {
+                                    filterSpec.filterType = "exists";
+                                    const auto& existsFilter = filterDef["exists"];
+                                    filterSpec.field = existsFilter["field"].get<std::string>();
+                                } else if (filterDef.contains("missing")) {
+                                    filterSpec.filterType = "missing";
+                                    const auto& missingFilter = filterDef["missing"];
+                                    filterSpec.field = missingFilter["field"].get<std::string>();
+                                }
+
+                                filters.push_back(filterSpec);
+                            }
+                        } else if (filtersObj.is_array()) {
+                            // Anonymous filters: [{"term": {...}}, {"term": {...}}]
+                            int index = 0;
+                            for (const auto& filterDef : filtersObj) {
+                                DocumentStore::FilterSpec filterSpec;
+                                filterSpec.key = std::to_string(index++);  // Auto-generate key
+
+                                // Similar parsing as above for term, match, exists, missing
+                                if (filterDef.contains("term")) {
+                                    filterSpec.filterType = "term";
+                                    const auto& termFilter = filterDef["term"];
+
+                                    for (auto termIt = termFilter.begin(); termIt != termFilter.end(); ++termIt) {
+                                        filterSpec.field = termIt.key();
+
+                                        if (termIt.value().is_number()) {
+                                            filterSpec.numericValue = termIt.value().get<double>();
+                                            filterSpec.useNumeric = true;
+                                        } else {
+                                            filterSpec.value = termIt.value().get<std::string>();
+                                            filterSpec.useNumeric = false;
+                                        }
+                                        break;
+                                    }
+                                } else if (filterDef.contains("match")) {
+                                    filterSpec.filterType = "match";
+                                    const auto& matchFilter = filterDef["match"];
+
+                                    for (auto matchIt = matchFilter.begin(); matchIt != matchFilter.end(); ++matchIt) {
+                                        filterSpec.field = matchIt.key();
+                                        filterSpec.value = matchIt.value().get<std::string>();
+                                        break;
+                                    }
+                                }
+
+                                filters.push_back(filterSpec);
+                            }
+                        }
+                    }
+
+                    aggResult.type = "filters";
+                    aggResult.filterBuckets = documentStore_->aggregateFilters(filters, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
             }
         }
 
@@ -1159,6 +1266,14 @@ char* diagon_search_with_filter(
                         bucketsArray.push_back(bucketJson);
                     }
                     aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "filters") {
+                    nlohmann::json bucketsJson;
+                    for (const auto& bucket : aggPair.second.filterBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsJson[bucket.key] = bucketJson;
+                    }
+                    aggJson["buckets"] = bucketsJson;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;
@@ -1567,6 +1682,14 @@ char* diagon_distributed_search(
                         bucketsArray.push_back(bucketJson);
                     }
                     aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "filters") {
+                    nlohmann::json bucketsJson;
+                    for (const auto& bucket : aggPair.second.filterBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsJson[bucket.key] = bucketJson;
+                    }
+                    aggJson["buckets"] = bucketsJson;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;

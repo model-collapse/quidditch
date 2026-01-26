@@ -176,6 +176,21 @@ public:
         int64_t docCount;         // Number of documents in range
     };
 
+    struct FilterBucket {
+        std::string key;          // Bucket name/label
+        int64_t docCount;         // Number of documents matching filter
+    };
+
+    // Filter specification for filters aggregation
+    struct FilterSpec {
+        std::string key;          // Bucket name
+        std::string filterType;   // "term", "match", "range", "exists", etc.
+        std::string field;        // Field name for simple filters
+        std::string value;        // Value to match (for term filters)
+        double numericValue;      // Numeric value (for numeric comparisons)
+        bool useNumeric;          // Whether to use numeric comparison
+    };
+
     // Terms aggregation (faceting)
     std::vector<TermBucket> aggregateTerms(
         const std::string& field,
@@ -246,6 +261,11 @@ public:
     std::vector<RangeBucket> aggregateRange(
         const std::string& field,
         const std::vector<RangeBucket>& ranges,
+        const std::vector<std::string>& docIds) const;
+
+    // Filters aggregation (count documents matching multiple filters)
+    std::vector<FilterBucket> aggregateFilters(
+        const std::vector<FilterSpec>& filters,
         const std::vector<std::string>& docIds) const;
 
     // Statistics
