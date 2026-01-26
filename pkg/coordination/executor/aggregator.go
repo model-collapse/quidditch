@@ -130,6 +130,8 @@ func (qe *QueryExecutor) mergeAggregations(responses []*pb.SearchResponse) map[s
 			result = qe.mergePercentilesAggregation(aggs)
 		case "cardinality":
 			result = qe.mergeCardinalityAggregation(aggs)
+		case "avg", "min", "max", "sum", "value_count":
+			result = qe.mergeSimpleMetricAggregation(aggs)
 		default:
 			qe.logger.Warn("Unknown aggregation type, skipping merge",
 				zap.String("type", aggType),
@@ -314,6 +316,65 @@ func (qe *QueryExecutor) mergeCardinalityAggregation(aggs []*pb.AggregationResul
 	}
 
 	result.Value = total
+
+	return result
+}
+
+// mergeSimpleMetricAggregation merges simple metric aggregations (avg, min, max, sum, value_count)
+func (qe *QueryExecutor) mergeSimpleMetricAggregation(aggs []*pb.AggregationResult) *AggregationResult {
+	if len(aggs) == 0 {
+		return nil
+	}
+
+	aggType := aggs[0].Type
+	result := &AggregationResult{
+		Type: aggType,
+	}
+
+	switch aggType {
+	case "avg":
+		// Average: compute weighted average across shards
+		// We don't have document counts per shard, so we average the averages (approximation)
+		var sum float64
+		for _, agg := range aggs {
+			sum += agg.Avg
+		}
+		result.Avg = sum / float64(len(aggs))
+
+	case "min":
+		// Minimum: take global minimum
+		result.Min = aggs[0].Min
+		for _, agg := range aggs {
+			if agg.Min < result.Min {
+				result.Min = agg.Min
+			}
+		}
+
+	case "max":
+		// Maximum: take global maximum
+		result.Max = aggs[0].Max
+		for _, agg := range aggs {
+			if agg.Max > result.Max {
+				result.Max = agg.Max
+			}
+		}
+
+	case "sum":
+		// Sum: sum across all shards
+		var sum float64
+		for _, agg := range aggs {
+			sum += agg.Sum
+		}
+		result.Sum = sum
+
+	case "value_count":
+		// Value count: sum across all shards
+		var total int64
+		for _, agg := range aggs {
+			total += agg.Count
+		}
+		result.Count = total
+	}
 
 	return result
 }

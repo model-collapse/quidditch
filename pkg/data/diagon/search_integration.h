@@ -29,7 +29,7 @@ struct SearchOptions {
 // Aggregation results
 struct AggregationResult {
     std::string name;
-    std::string type;  // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats"
+    std::string type;  // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats", "avg", "min", "max", "sum", "value_count"
 
     // Terms aggregation buckets
     std::vector<std::pair<std::string, int64_t>> buckets;
@@ -59,6 +59,11 @@ struct AggregationResult {
     double stdDeviation = 0.0;
     double stdDeviationBounds_upper = 0.0;
     double stdDeviationBounds_lower = 0.0;
+
+    // Simple metric aggregations (single-value metrics)
+    // For avg, min, max, sum: use the existing fields above
+    // For value_count: use 'count' field
+    double value = 0.0;  // Generic value field for single-metric aggregations
 };
 
 // SearchResult represents the result of a search query

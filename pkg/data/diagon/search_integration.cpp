@@ -849,6 +849,56 @@ SearchResult Shard::searchWithoutFilter(
 
                     result.aggregations[aggName] = aggResult;
                 }
+                else if (aggDef.contains("avg")) {
+                    // Average aggregation (simple metric)
+                    auto avgAgg = aggDef["avg"];
+                    std::string field = avgAgg["field"].get<std::string>();
+
+                    aggResult.type = "avg";
+                    aggResult.avg = documentStore_->aggregateAvg(field, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("min")) {
+                    // Min aggregation (simple metric)
+                    auto minAgg = aggDef["min"];
+                    std::string field = minAgg["field"].get<std::string>();
+
+                    aggResult.type = "min";
+                    aggResult.min = documentStore_->aggregateMin(field, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("max")) {
+                    // Max aggregation (simple metric)
+                    auto maxAgg = aggDef["max"];
+                    std::string field = maxAgg["field"].get<std::string>();
+
+                    aggResult.type = "max";
+                    aggResult.max = documentStore_->aggregateMax(field, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("sum")) {
+                    // Sum aggregation (simple metric)
+                    auto sumAgg = aggDef["sum"];
+                    std::string field = sumAgg["field"].get<std::string>();
+
+                    aggResult.type = "sum";
+                    aggResult.sum = documentStore_->aggregateSum(field, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("value_count")) {
+                    // Value count aggregation (simple metric)
+                    auto valCountAgg = aggDef["value_count"];
+                    std::string field = valCountAgg["field"].get<std::string>();
+
+                    aggResult.type = "value_count";
+                    aggResult.count = documentStore_->aggregateValueCount(field, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
             }
         }
 
@@ -1027,6 +1077,16 @@ char* diagon_search_with_filter(
                     aggJson["std_deviation"] = aggPair.second.stdDeviation;
                     aggJson["std_deviation_bounds_upper"] = aggPair.second.stdDeviationBounds_upper;
                     aggJson["std_deviation_bounds_lower"] = aggPair.second.stdDeviationBounds_lower;
+                } else if (aggPair.second.type == "avg") {
+                    aggJson["value"] = aggPair.second.avg;
+                } else if (aggPair.second.type == "min") {
+                    aggJson["value"] = aggPair.second.min;
+                } else if (aggPair.second.type == "max") {
+                    aggJson["value"] = aggPair.second.max;
+                } else if (aggPair.second.type == "sum") {
+                    aggJson["value"] = aggPair.second.sum;
+                } else if (aggPair.second.type == "value_count") {
+                    aggJson["value"] = aggPair.second.count;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;
@@ -1410,6 +1470,16 @@ char* diagon_distributed_search(
                     aggJson["std_deviation"] = aggPair.second.stdDeviation;
                     aggJson["std_deviation_bounds_upper"] = aggPair.second.stdDeviationBounds_upper;
                     aggJson["std_deviation_bounds_lower"] = aggPair.second.stdDeviationBounds_lower;
+                } else if (aggPair.second.type == "avg") {
+                    aggJson["value"] = aggPair.second.avg;
+                } else if (aggPair.second.type == "min") {
+                    aggJson["value"] = aggPair.second.min;
+                } else if (aggPair.second.type == "max") {
+                    aggJson["value"] = aggPair.second.max;
+                } else if (aggPair.second.type == "sum") {
+                    aggJson["value"] = aggPair.second.sum;
+                } else if (aggPair.second.type == "value_count") {
+                    aggJson["value"] = aggPair.second.count;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;

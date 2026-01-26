@@ -1175,6 +1175,240 @@ DocumentStore::ExtendedStatsAggregation DocumentStore::aggregateExtendedStats(
     return stats;
 }
 
+// Simple metric aggregations
+
+double DocumentStore::aggregateAvg(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    double sum = 0.0;
+    int64_t count = 0;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    sum += value.get<double>();
+                    count++;
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return count > 0 ? sum / count : 0.0;
+}
+
+double DocumentStore::aggregateMin(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    double minValue = std::numeric_limits<double>::max();
+    bool found = false;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    minValue = std::min(minValue, value.get<double>());
+                    found = true;
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return found ? minValue : 0.0;
+}
+
+double DocumentStore::aggregateMax(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    double maxValue = std::numeric_limits<double>::lowest();
+    bool found = false;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    maxValue = std::max(maxValue, value.get<double>());
+                    found = true;
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return found ? maxValue : 0.0;
+}
+
+double DocumentStore::aggregateSum(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    double sum = 0.0;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    sum += value.get<double>();
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return sum;
+}
+
+int64_t DocumentStore::aggregateValueCount(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    int64_t count = 0;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                // Count any non-null value
+                if (!value.is_null()) {
+                    count++;
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return count;
+}
+
 // Helper: Check if string matches wildcard pattern
 bool DocumentStore::matchWildcard(const std::string& str, const std::string& pattern) const {
     size_t sLen = str.length();

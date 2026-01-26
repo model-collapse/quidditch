@@ -206,6 +206,33 @@ public:
         const std::string& field,
         const std::vector<std::string>& docIds) const;
 
+    // Simple metric aggregations (single-value metrics)
+
+    // Average aggregation (single metric)
+    double aggregateAvg(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Min aggregation (single metric)
+    double aggregateMin(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Max aggregation (single metric)
+    double aggregateMax(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Sum aggregation (single metric)
+    double aggregateSum(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Value count aggregation (count non-null values)
+    int64_t aggregateValueCount(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
     // Statistics
     struct Stats {
         int64_t documentCount;
