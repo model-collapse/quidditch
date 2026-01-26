@@ -251,54 +251,50 @@ curl -X GET "http://localhost:9200/products/_search" \
 
 ## Quick Start
 
-### Prerequisites
-
-- Kubernetes 1.24+
-- kubectl configured
-- Helm 3.0+
-
-### Install Operator
+### One-Command Deploy 🚀
 
 ```bash
-# Add Helm repository
-helm repo add quidditch https://quidditch.io/charts
-helm repo update
+# Clone repository
+git clone https://github.com/yourorg/quidditch.git
+cd quidditch
 
-# Install operator
-kubectl create namespace quidditch-system
-helm install quidditch-operator quidditch/operator \
-  --namespace quidditch-system
-```
-
-### Deploy Cluster
-
-```bash
-# Create development cluster
-cat <<EOF | kubectl apply -f -
-apiVersion: quidditch.io/v1
-kind: QuidditchCluster
-metadata:
-  name: quidditch-dev
-  namespace: default
-spec:
-  version: "1.0.0"
-  master:
-    replicas: 1
-  coordination:
-    replicas: 1
-  data:
-    replicas: 1
-    storage:
-      class: "local-path"
-      size: "10Gi"
-EOF
-
-# Wait for ready
-kubectl wait --for=condition=Ready quidditchcluster/quidditch-dev --timeout=300s
+# Deploy to Kubernetes (auto-detects control plane mode)
+./scripts/deploy-k8s.sh --profile dev
 
 # Get endpoint
-kubectl get svc quidditch-dev-coordination
+kubectl get svc quidditch-coordination -n quidditch
 ```
+
+**That's it!** Your distributed search cluster is running.
+
+📖 **Detailed Guide**: [QUICKSTART_K8S.md](QUICKSTART_K8S.md)
+
+### Deployment Modes
+
+Quidditch supports two control plane modes:
+
+**K8S-Native (Auto-selected for K8S)**
+```bash
+./scripts/deploy-k8s.sh --mode k8s --profile dev
+```
+- Uses Kubernetes Operator + CRDs
+- Leverages K8S etcd (Raft built-in)
+- Cost: ~$40/month (AWS EKS)
+
+**Traditional Raft (For multi-environment)**
+```bash
+./scripts/deploy-k8s.sh --mode raft --profile prod
+```
+- Dedicated master nodes with Raft
+- Works on K8S, VMs, bare metal
+- Cost: ~$162/month (AWS EKS)
+
+**Auto-Detect (Default)**
+```bash
+./scripts/deploy-k8s.sh --mode auto
+```
+- K8S → Uses K8S-native
+- Non-K8S → Uses Raft
 
 ### Index & Search
 
