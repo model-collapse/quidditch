@@ -1239,16 +1239,17 @@ func (x *BulkIndexItemResponse) GetError() string {
 }
 
 type SearchRequest struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	IndexName      string                 `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	ShardId        int32                  `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Query          []byte                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"` // Serialized query DSL
-	From           int32                  `protobuf:"varint,4,opt,name=from,proto3" json:"from,omitempty"`
-	Size           int32                  `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
-	Sort           []string               `protobuf:"bytes,6,rep,name=sort,proto3" json:"sort,omitempty"`
-	TrackTotalHits bool                   `protobuf:"varint,7,opt,name=track_total_hits,json=trackTotalHits,proto3" json:"track_total_hits,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	IndexName        string                 `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	ShardId          int32                  `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Query            []byte                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"` // Serialized query DSL
+	From             int32                  `protobuf:"varint,4,opt,name=from,proto3" json:"from,omitempty"`
+	Size             int32                  `protobuf:"varint,5,opt,name=size,proto3" json:"size,omitempty"`
+	Sort             []string               `protobuf:"bytes,6,rep,name=sort,proto3" json:"sort,omitempty"`
+	TrackTotalHits   bool                   `protobuf:"varint,7,opt,name=track_total_hits,json=trackTotalHits,proto3" json:"track_total_hits,omitempty"`
+	FilterExpression []byte                 `protobuf:"bytes,8,opt,name=filter_expression,json=filterExpression,proto3" json:"filter_expression,omitempty"` // Serialized expression tree for native C++ evaluation
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *SearchRequest) Reset() {
@@ -1330,12 +1331,20 @@ func (x *SearchRequest) GetTrackTotalHits() bool {
 	return false
 }
 
+func (x *SearchRequest) GetFilterExpression() []byte {
+	if x != nil {
+		return x.FilterExpression
+	}
+	return nil
+}
+
 type SearchResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TookMillis    int64                  `protobuf:"varint,1,opt,name=took_millis,json=tookMillis,proto3" json:"took_millis,omitempty"`
-	TimedOut      bool                   `protobuf:"varint,2,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`
-	Shards        *ShardSearchStats      `protobuf:"bytes,3,opt,name=shards,proto3" json:"shards,omitempty"`
-	Hits          *SearchHits            `protobuf:"bytes,4,opt,name=hits,proto3" json:"hits,omitempty"`
+	state         protoimpl.MessageState        `protogen:"open.v1"`
+	TookMillis    int64                         `protobuf:"varint,1,opt,name=took_millis,json=tookMillis,proto3" json:"took_millis,omitempty"`
+	TimedOut      bool                          `protobuf:"varint,2,opt,name=timed_out,json=timedOut,proto3" json:"timed_out,omitempty"`
+	Shards        *ShardSearchStats             `protobuf:"bytes,3,opt,name=shards,proto3" json:"shards,omitempty"`
+	Hits          *SearchHits                   `protobuf:"bytes,4,opt,name=hits,proto3" json:"hits,omitempty"`
+	Aggregations  map[string]*AggregationResult `protobuf:"bytes,5,rep,name=aggregations,proto3" json:"aggregations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1394,6 +1403,13 @@ func (x *SearchResponse) GetShards() *ShardSearchStats {
 func (x *SearchResponse) GetHits() *SearchHits {
 	if x != nil {
 		return x.Hits
+	}
+	return nil
+}
+
+func (x *SearchResponse) GetAggregations() map[string]*AggregationResult {
+	if x != nil {
+		return x.Aggregations
 	}
 	return nil
 }
@@ -1638,18 +1654,239 @@ func (x *SearchHit) GetSort() []float64 {
 	return nil
 }
 
-type CountRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	IndexName     string                 `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
-	ShardId       int32                  `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
-	Query         []byte                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"` // Serialized query DSL
+type AggregationResult struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	Type  string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"` // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats
+	// Terms aggregation
+	Buckets []*AggregationBucket `protobuf:"bytes,2,rep,name=buckets,proto3" json:"buckets,omitempty"`
+	// Stats/Extended Stats aggregation
+	Count                   int64   `protobuf:"varint,3,opt,name=count,proto3" json:"count,omitempty"`
+	Min                     float64 `protobuf:"fixed64,4,opt,name=min,proto3" json:"min,omitempty"`
+	Max                     float64 `protobuf:"fixed64,5,opt,name=max,proto3" json:"max,omitempty"`
+	Avg                     float64 `protobuf:"fixed64,6,opt,name=avg,proto3" json:"avg,omitempty"`
+	Sum                     float64 `protobuf:"fixed64,7,opt,name=sum,proto3" json:"sum,omitempty"`
+	SumOfSquares            float64 `protobuf:"fixed64,8,opt,name=sum_of_squares,json=sumOfSquares,proto3" json:"sum_of_squares,omitempty"`
+	Variance                float64 `protobuf:"fixed64,9,opt,name=variance,proto3" json:"variance,omitempty"`
+	StdDeviation            float64 `protobuf:"fixed64,10,opt,name=std_deviation,json=stdDeviation,proto3" json:"std_deviation,omitempty"`
+	StdDeviationBoundsUpper float64 `protobuf:"fixed64,11,opt,name=std_deviation_bounds_upper,json=stdDeviationBoundsUpper,proto3" json:"std_deviation_bounds_upper,omitempty"`
+	StdDeviationBoundsLower float64 `protobuf:"fixed64,12,opt,name=std_deviation_bounds_lower,json=stdDeviationBoundsLower,proto3" json:"std_deviation_bounds_lower,omitempty"`
+	// Percentiles aggregation
+	Values map[string]float64 `protobuf:"bytes,13,rep,name=values,proto3" json:"values,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"fixed64,2,opt,name=value"` // percentile -> value
+	// Cardinality aggregation
+	Value         int64 `protobuf:"varint,14,opt,name=value,proto3" json:"value,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
+func (x *AggregationResult) Reset() {
+	*x = AggregationResult{}
+	mi := &file_pkg_common_proto_data_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AggregationResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AggregationResult) ProtoMessage() {}
+
+func (x *AggregationResult) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_common_proto_data_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AggregationResult.ProtoReflect.Descriptor instead.
+func (*AggregationResult) Descriptor() ([]byte, []int) {
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *AggregationResult) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *AggregationResult) GetBuckets() []*AggregationBucket {
+	if x != nil {
+		return x.Buckets
+	}
+	return nil
+}
+
+func (x *AggregationResult) GetCount() int64 {
+	if x != nil {
+		return x.Count
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetMin() float64 {
+	if x != nil {
+		return x.Min
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetMax() float64 {
+	if x != nil {
+		return x.Max
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetAvg() float64 {
+	if x != nil {
+		return x.Avg
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetSum() float64 {
+	if x != nil {
+		return x.Sum
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetSumOfSquares() float64 {
+	if x != nil {
+		return x.SumOfSquares
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetVariance() float64 {
+	if x != nil {
+		return x.Variance
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetStdDeviation() float64 {
+	if x != nil {
+		return x.StdDeviation
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetStdDeviationBoundsUpper() float64 {
+	if x != nil {
+		return x.StdDeviationBoundsUpper
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetStdDeviationBoundsLower() float64 {
+	if x != nil {
+		return x.StdDeviationBoundsLower
+	}
+	return 0
+}
+
+func (x *AggregationResult) GetValues() map[string]float64 {
+	if x != nil {
+		return x.Values
+	}
+	return nil
+}
+
+func (x *AggregationResult) GetValue() int64 {
+	if x != nil {
+		return x.Value
+	}
+	return 0
+}
+
+type AggregationBucket struct {
+	state           protoimpl.MessageState        `protogen:"open.v1"`
+	Key             string                        `protobuf:"bytes,1,opt,name=key,proto3" json:"key,omitempty"`                                   // For terms, date histogram key_as_string
+	NumericKey      float64                       `protobuf:"fixed64,2,opt,name=numeric_key,json=numericKey,proto3" json:"numeric_key,omitempty"` // For histogram, date histogram timestamp
+	DocCount        int64                         `protobuf:"varint,3,opt,name=doc_count,json=docCount,proto3" json:"doc_count,omitempty"`
+	SubAggregations map[string]*AggregationResult `protobuf:"bytes,4,rep,name=sub_aggregations,json=subAggregations,proto3" json:"sub_aggregations,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // For nested aggregations
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AggregationBucket) Reset() {
+	*x = AggregationBucket{}
+	mi := &file_pkg_common_proto_data_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AggregationBucket) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AggregationBucket) ProtoMessage() {}
+
+func (x *AggregationBucket) ProtoReflect() protoreflect.Message {
+	mi := &file_pkg_common_proto_data_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AggregationBucket.ProtoReflect.Descriptor instead.
+func (*AggregationBucket) Descriptor() ([]byte, []int) {
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *AggregationBucket) GetKey() string {
+	if x != nil {
+		return x.Key
+	}
+	return ""
+}
+
+func (x *AggregationBucket) GetNumericKey() float64 {
+	if x != nil {
+		return x.NumericKey
+	}
+	return 0
+}
+
+func (x *AggregationBucket) GetDocCount() int64 {
+	if x != nil {
+		return x.DocCount
+	}
+	return 0
+}
+
+func (x *AggregationBucket) GetSubAggregations() map[string]*AggregationResult {
+	if x != nil {
+		return x.SubAggregations
+	}
+	return nil
+}
+
+type CountRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	IndexName        string                 `protobuf:"bytes,1,opt,name=index_name,json=indexName,proto3" json:"index_name,omitempty"`
+	ShardId          int32                  `protobuf:"varint,2,opt,name=shard_id,json=shardId,proto3" json:"shard_id,omitempty"`
+	Query            []byte                 `protobuf:"bytes,3,opt,name=query,proto3" json:"query,omitempty"`                                               // Serialized query DSL
+	FilterExpression []byte                 `protobuf:"bytes,4,opt,name=filter_expression,json=filterExpression,proto3" json:"filter_expression,omitempty"` // Serialized expression tree for native C++ evaluation
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
 func (x *CountRequest) Reset() {
 	*x = CountRequest{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[26]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1661,7 +1898,7 @@ func (x *CountRequest) String() string {
 func (*CountRequest) ProtoMessage() {}
 
 func (x *CountRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[26]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1674,7 +1911,7 @@ func (x *CountRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountRequest.ProtoReflect.Descriptor instead.
 func (*CountRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{26}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *CountRequest) GetIndexName() string {
@@ -1698,6 +1935,13 @@ func (x *CountRequest) GetQuery() []byte {
 	return nil
 }
 
+func (x *CountRequest) GetFilterExpression() []byte {
+	if x != nil {
+		return x.FilterExpression
+	}
+	return nil
+}
+
 type CountResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Count         int64                  `protobuf:"varint,1,opt,name=count,proto3" json:"count,omitempty"`
@@ -1707,7 +1951,7 @@ type CountResponse struct {
 
 func (x *CountResponse) Reset() {
 	*x = CountResponse{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[27]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1719,7 +1963,7 @@ func (x *CountResponse) String() string {
 func (*CountResponse) ProtoMessage() {}
 
 func (x *CountResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[27]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1732,7 +1976,7 @@ func (x *CountResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CountResponse.ProtoReflect.Descriptor instead.
 func (*CountResponse) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{27}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *CountResponse) GetCount() int64 {
@@ -1752,7 +1996,7 @@ type GetShardStatsRequest struct {
 
 func (x *GetShardStatsRequest) Reset() {
 	*x = GetShardStatsRequest{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[28]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1764,7 +2008,7 @@ func (x *GetShardStatsRequest) String() string {
 func (*GetShardStatsRequest) ProtoMessage() {}
 
 func (x *GetShardStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[28]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1777,7 +2021,7 @@ func (x *GetShardStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetShardStatsRequest.ProtoReflect.Descriptor instead.
 func (*GetShardStatsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{28}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *GetShardStatsRequest) GetIndexName() string {
@@ -1812,7 +2056,7 @@ type ShardStats struct {
 
 func (x *ShardStats) Reset() {
 	*x = ShardStats{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[29]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1824,7 +2068,7 @@ func (x *ShardStats) String() string {
 func (*ShardStats) ProtoMessage() {}
 
 func (x *ShardStats) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[29]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1837,7 +2081,7 @@ func (x *ShardStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShardStats.ProtoReflect.Descriptor instead.
 func (*ShardStats) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{29}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *ShardStats) GetIndexName() string {
@@ -1919,7 +2163,7 @@ type GetNodeStatsRequest struct {
 
 func (x *GetNodeStatsRequest) Reset() {
 	*x = GetNodeStatsRequest{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[30]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1931,7 +2175,7 @@ func (x *GetNodeStatsRequest) String() string {
 func (*GetNodeStatsRequest) ProtoMessage() {}
 
 func (x *GetNodeStatsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[30]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1944,7 +2188,7 @@ func (x *GetNodeStatsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetNodeStatsRequest.ProtoReflect.Descriptor instead.
 func (*GetNodeStatsRequest) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{30}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetNodeStatsRequest) GetIncludeShards() bool {
@@ -1971,7 +2215,7 @@ type DataNodeStats struct {
 
 func (x *DataNodeStats) Reset() {
 	*x = DataNodeStats{}
-	mi := &file_pkg_common_proto_data_proto_msgTypes[31]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1983,7 +2227,7 @@ func (x *DataNodeStats) String() string {
 func (*DataNodeStats) ProtoMessage() {}
 
 func (x *DataNodeStats) ProtoReflect() protoreflect.Message {
-	mi := &file_pkg_common_proto_data_proto_msgTypes[31]
+	mi := &file_pkg_common_proto_data_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1996,7 +2240,7 @@ func (x *DataNodeStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DataNodeStats.ProtoReflect.Descriptor instead.
 func (*DataNodeStats) Descriptor() ([]byte, []int) {
-	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{31}
+	return file_pkg_common_proto_data_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *DataNodeStats) GetNodeId() string {
@@ -2168,7 +2412,7 @@ const file_pkg_common_proto_data_proto_rawDesc = "" +
 	"\x15BulkIndexItemResponse\x12\"\n" +
 	"\facknowledged\x18\x01 \x01(\bR\facknowledged\x12\x15\n" +
 	"\x06doc_id\x18\x02 \x01(\tR\x05docId\x12\x14\n" +
-	"\x05error\x18\x03 \x01(\tR\x05error\"\xc5\x01\n" +
+	"\x05error\x18\x03 \x01(\tR\x05error\"\xf2\x01\n" +
 	"\rSearchRequest\x12\x1d\n" +
 	"\n" +
 	"index_name\x18\x01 \x01(\tR\tindexName\x12\x19\n" +
@@ -2177,13 +2421,18 @@ const file_pkg_common_proto_data_proto_rawDesc = "" +
 	"\x04from\x18\x04 \x01(\x05R\x04from\x12\x12\n" +
 	"\x04size\x18\x05 \x01(\x05R\x04size\x12\x12\n" +
 	"\x04sort\x18\x06 \x03(\tR\x04sort\x12(\n" +
-	"\x10track_total_hits\x18\a \x01(\bR\x0etrackTotalHits\"\xb8\x01\n" +
+	"\x10track_total_hits\x18\a \x01(\bR\x0etrackTotalHits\x12+\n" +
+	"\x11filter_expression\x18\b \x01(\fR\x10filterExpression\"\xf2\x02\n" +
 	"\x0eSearchResponse\x12\x1f\n" +
 	"\vtook_millis\x18\x01 \x01(\x03R\n" +
 	"tookMillis\x12\x1b\n" +
 	"\ttimed_out\x18\x02 \x01(\bR\btimedOut\x128\n" +
 	"\x06shards\x18\x03 \x01(\v2 .quidditch.data.ShardSearchStatsR\x06shards\x12.\n" +
-	"\x04hits\x18\x04 \x01(\v2\x1a.quidditch.data.SearchHitsR\x04hits\"`\n" +
+	"\x04hits\x18\x04 \x01(\v2\x1a.quidditch.data.SearchHitsR\x04hits\x12T\n" +
+	"\faggregations\x18\x05 \x03(\v20.quidditch.data.SearchResponse.AggregationsEntryR\faggregations\x1ab\n" +
+	"\x11AggregationsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
+	"\x05value\x18\x02 \x01(\v2!.quidditch.data.AggregationResultR\x05value:\x028\x01\"`\n" +
 	"\x10ShardSearchStats\x12\x14\n" +
 	"\x05total\x18\x01 \x01(\x05R\x05total\x12\x1e\n" +
 	"\n" +
@@ -2202,12 +2451,41 @@ const file_pkg_common_proto_data_proto_rawDesc = "" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05score\x18\x02 \x01(\x01R\x05score\x12/\n" +
 	"\x06source\x18\x03 \x01(\v2\x17.google.protobuf.StructR\x06source\x12\x12\n" +
-	"\x04sort\x18\x04 \x03(\x01R\x04sort\"^\n" +
+	"\x04sort\x18\x04 \x03(\x01R\x04sort\"\xbb\x04\n" +
+	"\x11AggregationResult\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12;\n" +
+	"\abuckets\x18\x02 \x03(\v2!.quidditch.data.AggregationBucketR\abuckets\x12\x14\n" +
+	"\x05count\x18\x03 \x01(\x03R\x05count\x12\x10\n" +
+	"\x03min\x18\x04 \x01(\x01R\x03min\x12\x10\n" +
+	"\x03max\x18\x05 \x01(\x01R\x03max\x12\x10\n" +
+	"\x03avg\x18\x06 \x01(\x01R\x03avg\x12\x10\n" +
+	"\x03sum\x18\a \x01(\x01R\x03sum\x12$\n" +
+	"\x0esum_of_squares\x18\b \x01(\x01R\fsumOfSquares\x12\x1a\n" +
+	"\bvariance\x18\t \x01(\x01R\bvariance\x12#\n" +
+	"\rstd_deviation\x18\n" +
+	" \x01(\x01R\fstdDeviation\x12;\n" +
+	"\x1astd_deviation_bounds_upper\x18\v \x01(\x01R\x17stdDeviationBoundsUpper\x12;\n" +
+	"\x1astd_deviation_bounds_lower\x18\f \x01(\x01R\x17stdDeviationBoundsLower\x12E\n" +
+	"\x06values\x18\r \x03(\v2-.quidditch.data.AggregationResult.ValuesEntryR\x06values\x12\x14\n" +
+	"\x05value\x18\x0e \x01(\x03R\x05value\x1a9\n" +
+	"\vValuesEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
+	"\x05value\x18\x02 \x01(\x01R\x05value:\x028\x01\"\xad\x02\n" +
+	"\x11AggregationBucket\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x12\x1f\n" +
+	"\vnumeric_key\x18\x02 \x01(\x01R\n" +
+	"numericKey\x12\x1b\n" +
+	"\tdoc_count\x18\x03 \x01(\x03R\bdocCount\x12a\n" +
+	"\x10sub_aggregations\x18\x04 \x03(\v26.quidditch.data.AggregationBucket.SubAggregationsEntryR\x0fsubAggregations\x1ae\n" +
+	"\x14SubAggregationsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x127\n" +
+	"\x05value\x18\x02 \x01(\v2!.quidditch.data.AggregationResultR\x05value:\x028\x01\"\x8b\x01\n" +
 	"\fCountRequest\x12\x1d\n" +
 	"\n" +
 	"index_name\x18\x01 \x01(\tR\tindexName\x12\x19\n" +
 	"\bshard_id\x18\x02 \x01(\x05R\ashardId\x12\x14\n" +
-	"\x05query\x18\x03 \x01(\fR\x05query\"%\n" +
+	"\x05query\x18\x03 \x01(\fR\x05query\x12+\n" +
+	"\x11filter_expression\x18\x04 \x01(\fR\x10filterExpression\"%\n" +
 	"\rCountResponse\x12\x14\n" +
 	"\x05count\x18\x01 \x01(\x03R\x05count\"P\n" +
 	"\x14GetShardStatsRequest\x12\x1d\n" +
@@ -2273,7 +2551,7 @@ func file_pkg_common_proto_data_proto_rawDescGZIP() []byte {
 }
 
 var file_pkg_common_proto_data_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_pkg_common_proto_data_proto_msgTypes = make([]protoimpl.MessageInfo, 33)
+var file_pkg_common_proto_data_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_pkg_common_proto_data_proto_goTypes = []any{
 	(ShardInfo_ShardState)(0),      // 0: quidditch.data.ShardInfo.ShardState
 	(*CreateShardRequest)(nil),     // 1: quidditch.data.CreateShardRequest
@@ -2302,63 +2580,74 @@ var file_pkg_common_proto_data_proto_goTypes = []any{
 	(*SearchHits)(nil),             // 24: quidditch.data.SearchHits
 	(*TotalHits)(nil),              // 25: quidditch.data.TotalHits
 	(*SearchHit)(nil),              // 26: quidditch.data.SearchHit
-	(*CountRequest)(nil),           // 27: quidditch.data.CountRequest
-	(*CountResponse)(nil),          // 28: quidditch.data.CountResponse
-	(*GetShardStatsRequest)(nil),   // 29: quidditch.data.GetShardStatsRequest
-	(*ShardStats)(nil),             // 30: quidditch.data.ShardStats
-	(*GetNodeStatsRequest)(nil),    // 31: quidditch.data.GetNodeStatsRequest
-	(*DataNodeStats)(nil),          // 32: quidditch.data.DataNodeStats
-	nil,                            // 33: quidditch.data.CreateShardRequest.SettingsEntry
-	(*timestamppb.Timestamp)(nil),  // 34: google.protobuf.Timestamp
-	(*structpb.Struct)(nil),        // 35: google.protobuf.Struct
+	(*AggregationResult)(nil),      // 27: quidditch.data.AggregationResult
+	(*AggregationBucket)(nil),      // 28: quidditch.data.AggregationBucket
+	(*CountRequest)(nil),           // 29: quidditch.data.CountRequest
+	(*CountResponse)(nil),          // 30: quidditch.data.CountResponse
+	(*GetShardStatsRequest)(nil),   // 31: quidditch.data.GetShardStatsRequest
+	(*ShardStats)(nil),             // 32: quidditch.data.ShardStats
+	(*GetNodeStatsRequest)(nil),    // 33: quidditch.data.GetNodeStatsRequest
+	(*DataNodeStats)(nil),          // 34: quidditch.data.DataNodeStats
+	nil,                            // 35: quidditch.data.CreateShardRequest.SettingsEntry
+	nil,                            // 36: quidditch.data.SearchResponse.AggregationsEntry
+	nil,                            // 37: quidditch.data.AggregationResult.ValuesEntry
+	nil,                            // 38: quidditch.data.AggregationBucket.SubAggregationsEntry
+	(*timestamppb.Timestamp)(nil),  // 39: google.protobuf.Timestamp
+	(*structpb.Struct)(nil),        // 40: google.protobuf.Struct
 }
 var file_pkg_common_proto_data_proto_depIdxs = []int32{
-	33, // 0: quidditch.data.CreateShardRequest.settings:type_name -> quidditch.data.CreateShardRequest.SettingsEntry
+	35, // 0: quidditch.data.CreateShardRequest.settings:type_name -> quidditch.data.CreateShardRequest.SettingsEntry
 	0,  // 1: quidditch.data.ShardInfo.state:type_name -> quidditch.data.ShardInfo.ShardState
-	34, // 2: quidditch.data.ShardInfo.created_at:type_name -> google.protobuf.Timestamp
-	34, // 3: quidditch.data.ShardInfo.last_updated:type_name -> google.protobuf.Timestamp
-	35, // 4: quidditch.data.IndexDocumentRequest.document:type_name -> google.protobuf.Struct
-	35, // 5: quidditch.data.GetDocumentResponse.document:type_name -> google.protobuf.Struct
+	39, // 2: quidditch.data.ShardInfo.created_at:type_name -> google.protobuf.Timestamp
+	39, // 3: quidditch.data.ShardInfo.last_updated:type_name -> google.protobuf.Timestamp
+	40, // 4: quidditch.data.IndexDocumentRequest.document:type_name -> google.protobuf.Struct
+	40, // 5: quidditch.data.GetDocumentResponse.document:type_name -> google.protobuf.Struct
 	18, // 6: quidditch.data.BulkIndexRequest.items:type_name -> quidditch.data.BulkIndexItem
-	35, // 7: quidditch.data.BulkIndexItem.document:type_name -> google.protobuf.Struct
+	40, // 7: quidditch.data.BulkIndexItem.document:type_name -> google.protobuf.Struct
 	20, // 8: quidditch.data.BulkIndexResponse.items:type_name -> quidditch.data.BulkIndexItemResponse
 	23, // 9: quidditch.data.SearchResponse.shards:type_name -> quidditch.data.ShardSearchStats
 	24, // 10: quidditch.data.SearchResponse.hits:type_name -> quidditch.data.SearchHits
-	25, // 11: quidditch.data.SearchHits.total:type_name -> quidditch.data.TotalHits
-	26, // 12: quidditch.data.SearchHits.hits:type_name -> quidditch.data.SearchHit
-	35, // 13: quidditch.data.SearchHit.source:type_name -> google.protobuf.Struct
-	30, // 14: quidditch.data.DataNodeStats.shards:type_name -> quidditch.data.ShardStats
-	1,  // 15: quidditch.data.DataService.CreateShard:input_type -> quidditch.data.CreateShardRequest
-	3,  // 16: quidditch.data.DataService.DeleteShard:input_type -> quidditch.data.DeleteShardRequest
-	5,  // 17: quidditch.data.DataService.GetShardInfo:input_type -> quidditch.data.GetShardInfoRequest
-	7,  // 18: quidditch.data.DataService.RefreshShard:input_type -> quidditch.data.RefreshShardRequest
-	9,  // 19: quidditch.data.DataService.FlushShard:input_type -> quidditch.data.FlushShardRequest
-	11, // 20: quidditch.data.DataService.IndexDocument:input_type -> quidditch.data.IndexDocumentRequest
-	13, // 21: quidditch.data.DataService.GetDocument:input_type -> quidditch.data.GetDocumentRequest
-	15, // 22: quidditch.data.DataService.DeleteDocument:input_type -> quidditch.data.DeleteDocumentRequest
-	17, // 23: quidditch.data.DataService.BulkIndex:input_type -> quidditch.data.BulkIndexRequest
-	21, // 24: quidditch.data.DataService.Search:input_type -> quidditch.data.SearchRequest
-	27, // 25: quidditch.data.DataService.Count:input_type -> quidditch.data.CountRequest
-	29, // 26: quidditch.data.DataService.GetShardStats:input_type -> quidditch.data.GetShardStatsRequest
-	31, // 27: quidditch.data.DataService.GetNodeStats:input_type -> quidditch.data.GetNodeStatsRequest
-	2,  // 28: quidditch.data.DataService.CreateShard:output_type -> quidditch.data.CreateShardResponse
-	4,  // 29: quidditch.data.DataService.DeleteShard:output_type -> quidditch.data.DeleteShardResponse
-	6,  // 30: quidditch.data.DataService.GetShardInfo:output_type -> quidditch.data.ShardInfo
-	8,  // 31: quidditch.data.DataService.RefreshShard:output_type -> quidditch.data.RefreshShardResponse
-	10, // 32: quidditch.data.DataService.FlushShard:output_type -> quidditch.data.FlushShardResponse
-	12, // 33: quidditch.data.DataService.IndexDocument:output_type -> quidditch.data.IndexDocumentResponse
-	14, // 34: quidditch.data.DataService.GetDocument:output_type -> quidditch.data.GetDocumentResponse
-	16, // 35: quidditch.data.DataService.DeleteDocument:output_type -> quidditch.data.DeleteDocumentResponse
-	19, // 36: quidditch.data.DataService.BulkIndex:output_type -> quidditch.data.BulkIndexResponse
-	22, // 37: quidditch.data.DataService.Search:output_type -> quidditch.data.SearchResponse
-	28, // 38: quidditch.data.DataService.Count:output_type -> quidditch.data.CountResponse
-	30, // 39: quidditch.data.DataService.GetShardStats:output_type -> quidditch.data.ShardStats
-	32, // 40: quidditch.data.DataService.GetNodeStats:output_type -> quidditch.data.DataNodeStats
-	28, // [28:41] is the sub-list for method output_type
-	15, // [15:28] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	36, // 11: quidditch.data.SearchResponse.aggregations:type_name -> quidditch.data.SearchResponse.AggregationsEntry
+	25, // 12: quidditch.data.SearchHits.total:type_name -> quidditch.data.TotalHits
+	26, // 13: quidditch.data.SearchHits.hits:type_name -> quidditch.data.SearchHit
+	40, // 14: quidditch.data.SearchHit.source:type_name -> google.protobuf.Struct
+	28, // 15: quidditch.data.AggregationResult.buckets:type_name -> quidditch.data.AggregationBucket
+	37, // 16: quidditch.data.AggregationResult.values:type_name -> quidditch.data.AggregationResult.ValuesEntry
+	38, // 17: quidditch.data.AggregationBucket.sub_aggregations:type_name -> quidditch.data.AggregationBucket.SubAggregationsEntry
+	32, // 18: quidditch.data.DataNodeStats.shards:type_name -> quidditch.data.ShardStats
+	27, // 19: quidditch.data.SearchResponse.AggregationsEntry.value:type_name -> quidditch.data.AggregationResult
+	27, // 20: quidditch.data.AggregationBucket.SubAggregationsEntry.value:type_name -> quidditch.data.AggregationResult
+	1,  // 21: quidditch.data.DataService.CreateShard:input_type -> quidditch.data.CreateShardRequest
+	3,  // 22: quidditch.data.DataService.DeleteShard:input_type -> quidditch.data.DeleteShardRequest
+	5,  // 23: quidditch.data.DataService.GetShardInfo:input_type -> quidditch.data.GetShardInfoRequest
+	7,  // 24: quidditch.data.DataService.RefreshShard:input_type -> quidditch.data.RefreshShardRequest
+	9,  // 25: quidditch.data.DataService.FlushShard:input_type -> quidditch.data.FlushShardRequest
+	11, // 26: quidditch.data.DataService.IndexDocument:input_type -> quidditch.data.IndexDocumentRequest
+	13, // 27: quidditch.data.DataService.GetDocument:input_type -> quidditch.data.GetDocumentRequest
+	15, // 28: quidditch.data.DataService.DeleteDocument:input_type -> quidditch.data.DeleteDocumentRequest
+	17, // 29: quidditch.data.DataService.BulkIndex:input_type -> quidditch.data.BulkIndexRequest
+	21, // 30: quidditch.data.DataService.Search:input_type -> quidditch.data.SearchRequest
+	29, // 31: quidditch.data.DataService.Count:input_type -> quidditch.data.CountRequest
+	31, // 32: quidditch.data.DataService.GetShardStats:input_type -> quidditch.data.GetShardStatsRequest
+	33, // 33: quidditch.data.DataService.GetNodeStats:input_type -> quidditch.data.GetNodeStatsRequest
+	2,  // 34: quidditch.data.DataService.CreateShard:output_type -> quidditch.data.CreateShardResponse
+	4,  // 35: quidditch.data.DataService.DeleteShard:output_type -> quidditch.data.DeleteShardResponse
+	6,  // 36: quidditch.data.DataService.GetShardInfo:output_type -> quidditch.data.ShardInfo
+	8,  // 37: quidditch.data.DataService.RefreshShard:output_type -> quidditch.data.RefreshShardResponse
+	10, // 38: quidditch.data.DataService.FlushShard:output_type -> quidditch.data.FlushShardResponse
+	12, // 39: quidditch.data.DataService.IndexDocument:output_type -> quidditch.data.IndexDocumentResponse
+	14, // 40: quidditch.data.DataService.GetDocument:output_type -> quidditch.data.GetDocumentResponse
+	16, // 41: quidditch.data.DataService.DeleteDocument:output_type -> quidditch.data.DeleteDocumentResponse
+	19, // 42: quidditch.data.DataService.BulkIndex:output_type -> quidditch.data.BulkIndexResponse
+	22, // 43: quidditch.data.DataService.Search:output_type -> quidditch.data.SearchResponse
+	30, // 44: quidditch.data.DataService.Count:output_type -> quidditch.data.CountResponse
+	32, // 45: quidditch.data.DataService.GetShardStats:output_type -> quidditch.data.ShardStats
+	34, // 46: quidditch.data.DataService.GetNodeStats:output_type -> quidditch.data.DataNodeStats
+	34, // [34:47] is the sub-list for method output_type
+	21, // [21:34] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_pkg_common_proto_data_proto_init() }
@@ -2372,7 +2661,7 @@ func file_pkg_common_proto_data_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_pkg_common_proto_data_proto_rawDesc), len(file_pkg_common_proto_data_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   33,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -176,6 +176,7 @@ message SearchResponse {
   bool timed_out = 2;
   ShardSearchStats shards = 3;
   SearchHits hits = 4;
+  map<string, AggregationResult> aggregations = 5;
 }
 
 message ShardSearchStats {
@@ -200,6 +201,40 @@ message SearchHit {
   double score = 2;
   google.protobuf.Struct source = 3;
   repeated double sort = 4;
+}
+
+// Aggregation Messages
+
+message AggregationResult {
+  string type = 1;  // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats
+
+  // Terms aggregation
+  repeated AggregationBucket buckets = 2;
+
+  // Stats/Extended Stats aggregation
+  int64 count = 3;
+  double min = 4;
+  double max = 5;
+  double avg = 6;
+  double sum = 7;
+  double sum_of_squares = 8;
+  double variance = 9;
+  double std_deviation = 10;
+  double std_deviation_bounds_upper = 11;
+  double std_deviation_bounds_lower = 12;
+
+  // Percentiles aggregation
+  map<string, double> values = 13;  // percentile -> value
+
+  // Cardinality aggregation
+  int64 value = 14;
+}
+
+message AggregationBucket {
+  string key = 1;            // For terms, date histogram key_as_string
+  double numeric_key = 2;    // For histogram, date histogram timestamp
+  int64 doc_count = 3;
+  map<string, AggregationResult> sub_aggregations = 4;  // For nested aggregations
 }
 
 message CountRequest {

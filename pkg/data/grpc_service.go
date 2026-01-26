@@ -6,6 +6,7 @@ import (
 	"time"
 
 	pb "github.com/quidditch/quidditch/pkg/common/proto"
+	"github.com/quidditch/quidditch/pkg/data/diagon"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -363,6 +364,9 @@ func (s *DataService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 		})
 	}
 
+	// Convert aggregations
+	aggregations := convertAggregations(result.Aggregations)
+
 	return &pb.SearchResponse{
 		TookMillis: tookMillis,
 		TimedOut:   false,
@@ -379,6 +383,7 @@ func (s *DataService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 			MaxScore: result.MaxScore,
 			Hits:     hits,
 		},
+		Aggregations: aggregations,
 	}, nil
 }
 
@@ -516,4 +521,99 @@ func convertJSONToDocument(data []byte) (map[string]interface{}, error) {
 		return nil, err
 	}
 	return doc, nil
+}
+
+// convertAggregations converts Diagon aggregations to protobuf format
+func convertAggregations(aggs map[string]diagon.AggregationResult) map[string]*pb.AggregationResult {
+	if len(aggs) == 0 {
+		return nil
+	}
+
+	result := make(map[string]*pb.AggregationResult, len(aggs))
+
+	for name, agg := range aggs {
+		pbAgg := &pb.AggregationResult{
+			Type: agg.Type,
+		}
+
+		// Convert based on aggregation type
+		switch agg.Type {
+		case "terms", "histogram", "date_histogram":
+			// Bucket aggregations
+			pbAgg.Buckets = convertBuckets(agg.Buckets)
+
+		case "stats", "extended_stats":
+			// Stats aggregations
+			pbAgg.Count = agg.Count
+			pbAgg.Min = agg.Min
+			pbAgg.Max = agg.Max
+			pbAgg.Avg = agg.Avg
+			pbAgg.Sum = agg.Sum
+
+			if agg.Type == "extended_stats" {
+				pbAgg.SumOfSquares = agg.SumOfSquares
+				pbAgg.Variance = agg.Variance
+				pbAgg.StdDeviation = agg.StdDeviation
+				pbAgg.StdDeviationBoundsUpper = agg.StdDeviationBoundsUpper
+				pbAgg.StdDeviationBoundsLower = agg.StdDeviationBoundsLower
+			}
+
+		case "percentiles":
+			// Percentiles aggregation
+			if agg.Values != nil {
+				pbAgg.Values = make(map[string]float64, len(agg.Values))
+				for k, v := range agg.Values {
+					pbAgg.Values[k] = v
+				}
+			}
+
+		case "cardinality":
+			// Cardinality aggregation
+			pbAgg.Value = agg.Value
+		}
+
+		result[name] = pbAgg
+	}
+
+	return result
+}
+
+// convertBuckets converts bucket data to protobuf format
+func convertBuckets(buckets []map[string]interface{}) []*pb.AggregationBucket {
+	if len(buckets) == 0 {
+		return nil
+	}
+
+	result := make([]*pb.AggregationBucket, 0, len(buckets))
+
+	for _, bucket := range buckets {
+		pbBucket := &pb.AggregationBucket{}
+
+		// Extract key (can be string or number)
+		if key, ok := bucket["key"].(string); ok {
+			pbBucket.Key = key
+		}
+		if numKey, ok := bucket["key"].(float64); ok {
+			pbBucket.NumericKey = numKey
+		}
+
+		// Extract key_as_string for date histograms
+		if keyAsString, ok := bucket["key_as_string"].(string); ok {
+			pbBucket.Key = keyAsString
+		}
+
+		// Extract doc_count
+		if docCount, ok := bucket["doc_count"].(int64); ok {
+			pbBucket.DocCount = docCount
+		} else if docCount, ok := bucket["doc_count"].(float64); ok {
+			pbBucket.DocCount = int64(docCount)
+		}
+
+		// TODO: Handle sub-aggregations if needed
+		// pbBucket.SubAggregations = convertAggregations(bucket["sub_aggs"])
+
+		result = append(result, pbBucket)
+	}
+
+	return result
 }
