@@ -538,7 +538,7 @@ func convertAggregations(aggs map[string]diagon.AggregationResult) map[string]*p
 
 		// Convert based on aggregation type
 		switch agg.Type {
-		case "terms", "histogram", "date_histogram":
+		case "terms", "histogram", "date_histogram", "range", "filters":
 			// Bucket aggregations
 			pbAgg.Buckets = convertBuckets(agg.Buckets)
 
@@ -557,6 +557,26 @@ func convertAggregations(aggs map[string]diagon.AggregationResult) map[string]*p
 				pbAgg.StdDeviationBoundsUpper = agg.StdDeviationBoundsUpper
 				pbAgg.StdDeviationBoundsLower = agg.StdDeviationBoundsLower
 			}
+
+		case "avg":
+			// Average aggregation
+			pbAgg.Avg = agg.Avg
+
+		case "min":
+			// Minimum aggregation
+			pbAgg.Min = agg.Min
+
+		case "max":
+			// Maximum aggregation
+			pbAgg.Max = agg.Max
+
+		case "sum":
+			// Sum aggregation
+			pbAgg.Sum = agg.Sum
+
+		case "value_count":
+			// Value count aggregation
+			pbAgg.Count = agg.Count
 
 		case "percentiles":
 			// Percentiles aggregation

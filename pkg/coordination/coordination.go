@@ -11,9 +11,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	pb "github.com/quidditch/quidditch/pkg/common/proto"
 	"github.com/quidditch/quidditch/pkg/common/config"
 	"github.com/quidditch/quidditch/pkg/common/metrics"
+	pb "github.com/quidditch/quidditch/pkg/common/proto"
 	"github.com/quidditch/quidditch/pkg/coordination/bulk"
 	"github.com/quidditch/quidditch/pkg/coordination/executor"
 	"github.com/quidditch/quidditch/pkg/coordination/parser"
@@ -24,18 +24,18 @@ import (
 
 // CoordinationNode represents a coordination node in the Quidditch cluster
 type CoordinationNode struct {
-	cfg            *config.CoordinationConfig
-	logger         *zap.Logger
-	ginRouter      *gin.Engine
-	httpServer     *http.Server
-	masterClient   *MasterClient
-	queryExecutor  *executor.QueryExecutor
-	queryPlanner   *planner.QueryPlanner
-	docRouter      *router.DocumentRouter
-	queryParser    *parser.QueryParser
-	metrics        *metrics.MetricsCollector
-	dataClients    map[string]*DataNodeClient
-	dataClientsMu  sync.RWMutex
+	cfg           *config.CoordinationConfig
+	logger        *zap.Logger
+	ginRouter     *gin.Engine
+	httpServer    *http.Server
+	masterClient  *MasterClient
+	queryExecutor *executor.QueryExecutor
+	queryPlanner  *planner.QueryPlanner
+	docRouter     *router.DocumentRouter
+	queryParser   *parser.QueryParser
+	metrics       *metrics.MetricsCollector
+	dataClients   map[string]*DataNodeClient
+	dataClientsMu sync.RWMutex
 }
 
 // NewCoordinationNode creates a new coordination node
@@ -106,6 +106,9 @@ func (c *CoordinationNode) Start(ctx context.Context) error {
 		c.logger.Warn("Failed to discover data nodes", zap.Error(err))
 		// Don't fail startup - data nodes can be discovered later
 	}
+
+	// Start continuous data node discovery in background
+	go c.continuousDataNodeDiscovery(ctx)
 
 	// Start HTTP server
 	c.httpServer = &http.Server{
@@ -337,12 +340,12 @@ func (c *CoordinationNode) handleClusterHealth(ctx *gin.Context) {
 
 func (c *CoordinationNode) handleClusterState(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
-		"cluster_name": "quidditch-cluster",
-		"version":      1,
-		"state_uuid":   "TBD",
-		"master_node":  "master-1",
-		"nodes":        gin.H{},
-		"metadata":     gin.H{},
+		"cluster_name":  "quidditch-cluster",
+		"version":       1,
+		"state_uuid":    "TBD",
+		"master_node":   "master-1",
+		"nodes":         gin.H{},
+		"metadata":      gin.H{},
 		"routing_table": gin.H{},
 	})
 }
@@ -691,10 +694,10 @@ func (c *CoordinationNode) handleUpdateDocument(ctx *gin.Context) {
 
 	// Parse update request body
 	var updateReq struct {
-		Doc             map[string]interface{} `json:"doc"`
-		DocAsUpsert     bool                   `json:"doc_as_upsert"`
-		ScriptedUpsert  bool                   `json:"scripted_upsert"`
-		Upsert          map[string]interface{} `json:"upsert"`
+		Doc            map[string]interface{} `json:"doc"`
+		DocAsUpsert    bool                   `json:"doc_as_upsert"`
+		ScriptedUpsert bool                   `json:"scripted_upsert"`
+		Upsert         map[string]interface{} `json:"upsert"`
 	}
 	if err := ctx.ShouldBindJSON(&updateReq); err != nil {
 		ctx.JSON(http.StatusBadRequest, gin.H{
@@ -1125,7 +1128,7 @@ func (c *CoordinationNode) handleCount(ctx *gin.Context) {
 
 func (c *CoordinationNode) handleNodes(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
-		"_nodes": gin.H{"total": 1, "successful": 1, "failed": 0},
+		"_nodes":       gin.H{"total": 1, "successful": 1, "failed": 0},
 		"cluster_name": "quidditch-cluster",
 		"nodes":        gin.H{},
 	})
@@ -1133,7 +1136,7 @@ func (c *CoordinationNode) handleNodes(ctx *gin.Context) {
 
 func (c *CoordinationNode) handleNodesStats(ctx *gin.Context) {
 	ctx.JSON(http.StatusOK, gin.H{
-		"_nodes": gin.H{"total": 1, "successful": 1, "failed": 0},
+		"_nodes":       gin.H{"total": 1, "successful": 1, "failed": 0},
 		"cluster_name": "quidditch-cluster",
 		"nodes":        gin.H{},
 	})
@@ -1218,6 +1221,98 @@ func (c *CoordinationNode) discoverDataNodes(ctx context.Context) error {
 		zap.Int("data_nodes", dataNodeCount))
 
 	return nil
+}
+
+// continuousDataNodeDiscovery periodically discovers new data nodes joining the cluster
+func (c *CoordinationNode) continuousDataNodeDiscovery(ctx context.Context) {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+
+	c.logger.Info("Starting continuous data node discovery (every 30s)")
+
+	for {
+		select {
+		case <-ctx.Done():
+			c.logger.Info("Stopping continuous data node discovery")
+			return
+		case <-ticker.C:
+			c.refreshDataNodeClients(ctx)
+		}
+	}
+}
+
+// refreshDataNodeClients discovers new data nodes and registers them with the query executor
+func (c *CoordinationNode) refreshDataNodeClients(ctx context.Context) {
+	c.logger.Debug("Refreshing data node clients")
+
+	// Get cluster state from master
+	state, err := c.masterClient.GetClusterState(ctx, false, true, false)
+	if err != nil {
+		c.logger.Error("Failed to get cluster state for refresh", zap.Error(err))
+		return
+	}
+
+	// Track newly discovered nodes
+	newNodes := 0
+
+	// Register any new data node clients
+	for _, node := range state.Nodes {
+		if node.NodeType != pb.NodeType_NODE_TYPE_DATA {
+			continue
+		}
+
+		nodeID := node.NodeId
+
+		// Check if client already exists
+		c.dataClientsMu.RLock()
+		_, exists := c.dataClients[nodeID]
+		c.dataClientsMu.RUnlock()
+
+		if exists {
+			continue // Already registered
+		}
+
+		// Construct data node address
+		address := fmt.Sprintf("%s:%d", node.BindAddr, node.GrpcPort)
+
+		// Create data node client
+		dataClient := NewDataNodeClient(nodeID, address, c.logger)
+
+		// Connect to the new data node
+		if err := dataClient.Connect(ctx); err != nil {
+			c.logger.Error("Failed to connect to new data node",
+				zap.String("node_id", nodeID),
+				zap.String("address", address),
+				zap.Error(err))
+			continue
+		}
+
+		// Store in coordination node
+		c.dataClientsMu.Lock()
+		c.dataClients[nodeID] = dataClient
+		c.dataClientsMu.Unlock()
+
+		// Register with query executor
+		c.queryExecutor.RegisterDataNode(dataClient)
+
+		// Update document router
+		c.dataClientsMu.RLock()
+		dataClientInterfaces := make(map[string]router.DataNodeClient)
+		for id, client := range c.dataClients {
+			dataClientInterfaces[id] = client
+		}
+		c.dataClientsMu.RUnlock()
+		c.docRouter.SetDataClients(dataClientInterfaces)
+
+		c.logger.Info("Registered new data node",
+			zap.String("node_id", nodeID),
+			zap.String("address", address))
+		newNodes++
+	}
+
+	if newNodes > 0 {
+		c.logger.Info("Discovered new data nodes", zap.Int("count", newNodes))
+	}
 }
 
 // ginLogger creates a Gin middleware that logs requests using zap
