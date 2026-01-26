@@ -100,8 +100,8 @@ func TestDataNodeAutoDiscovery(t *testing.T) {
 	t.Log("Adding 3rd data node dynamically...")
 
 	// Create a new data node configuration
-	newNodeID := "data-2"
-	newNodePort := cfg.StartPorts.DataGRPCBase + 2
+	// newNodeID := "data-2"
+	// newNodePort := cfg.StartPorts.DataGRPCBase + 2
 
 	// Add the node to the cluster (simulating a node joining)
 	// Note: In production, this would be a separate process

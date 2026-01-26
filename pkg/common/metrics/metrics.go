@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -383,5 +384,5 @@ func (m *MetricsCollector) RecordBulkOperation(operation, status string, duratio
 // statusClass converts HTTP status code to status class (2xx, 3xx, 4xx, 5xx)
 func statusClass(status int) string {
 	class := status / 100
-	return prometheus.StatusCode(class * 100)
+	return fmt.Sprintf("%dxx", class)
 }

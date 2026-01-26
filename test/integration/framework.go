@@ -18,7 +18,7 @@ import (
 
 // TestCluster represents a multi-node test cluster
 type TestCluster struct {
-	t              *testing.T
+	t              testing.TB
 	logger         *zap.Logger
 	baseDir        string
 	masterNodes    []*MasterNodeWrapper
@@ -88,7 +88,7 @@ func DefaultClusterConfig() *ClusterConfig {
 }
 
 // NewTestCluster creates a new test cluster
-func NewTestCluster(t *testing.T, cfg *ClusterConfig) (*TestCluster, error) {
+func NewTestCluster(t testing.TB, cfg *ClusterConfig) (*TestCluster, error) {
 	logger, err := zap.NewDevelopment()
 	if err != nil {
 		return nil, fmt.Errorf("failed to create logger: %w", err)
@@ -221,7 +221,6 @@ func (tc *TestCluster) createDataNodes(cfg *ClusterConfig) error {
 			GRPCPort:    cfg.StartPorts.DataGRPCBase + i,
 			DataDir:     dataDir,
 			MasterAddr:  masterAddr,
-			NodeType:    "data",
 			StorageTier: "hot",
 			MaxShards:   100,
 			LogLevel:    "debug",

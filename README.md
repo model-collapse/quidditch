@@ -368,6 +368,36 @@ curl -X GET "http://localhost:9200/my-index/_search" \
 - Examples (synonym expansion, ML re-ranking, A/B testing)
 - Testing and deployment
 
+### Master Node Architecture
+
+📖 **[Master Node Architecture](docs/MASTER_NODE_ARCHITECTURE.md)** - Control plane design
+- Master node responsibilities and Raft consensus
+- Bandwidth allocation analysis (16 KB/sec total)
+- Traditional deployment patterns
+- Kubernetes deployment options
+- Cost analysis and recommendations
+- **Key finding**: 3 master nodes can handle 1000+ data nodes
+
+📖 **[Kubernetes Deployment Guide](docs/KUBERNETES_DEPLOYMENT_GUIDE.md)** - K8S patterns
+- Complete manifests (StatefulSets, Deployments, Services)
+- Traditional masters vs K8S-native control plane
+- Production patterns (multi-zone, node selectors, PDBs)
+- Cost analysis ($162/month for 3 masters)
+- Migration strategies and Helm charts
+
+📖 **[K8S-Native Deep Dive](docs/K8S_NATIVE_DEEP_DIVE.md)** - Cloud-native architecture analysis
+- Why K8S-native should be considered for K8S deployments
+- K8S already provides Raft (via etcd/strong consistency)
+- Operator pattern as 2026 standard (Vitess, TiDB, Strimzi)
+- Complete CRD and Controller implementation examples
+- Cost/latency/complexity trade-off analysis
+- **Revised Recommendation**: K8S-native for K8S-only deployments; Traditional masters for multi-environment
+
+📖 **[K8S-Native Summary](K8S_NATIVE_SUMMARY.md)** - Quick architectural decision guide
+- Decision framework for choosing control plane architecture
+- Trade-offs comparison (Traditional vs K8S-Native)
+- Hybrid approach for flexibility
+
 ### Diagon Core
 
 🔗 **[Diagon Project](https://github.com/model-collapse/diagon)** - Underlying search engine
@@ -712,7 +742,7 @@ Quidditch is built upon the foundational work of:
 
 **Version**: 1.0.0-design
 
-**Last Updated**: 2026-01-25
+**Last Updated**: 2026-01-26
 
 **Estimated 1.0 Release**: Month 18 (Mid 2027)
 

@@ -16,7 +16,7 @@ type QueryPlan struct {
 	SearchRequest *parser.SearchRequest
 
 	// Optimized query (may be rewritten)
-	OptimizedQuery *parser.Query
+	OptimizedQuery parser.Query
 
 	// Target shards for this query
 	TargetShards []int32
@@ -87,17 +87,17 @@ func (qp *QueryPlanner) PlanQuery(ctx context.Context, indexName string, searchR
 	// Create initial plan
 	plan := &QueryPlan{
 		SearchRequest:  searchReq,
-		OptimizedQuery: searchReq.Query,
+		OptimizedQuery: searchReq.ParsedQuery,
 		Stats: &QueryStats{
 			ShardCount: len(routing),
 		},
 	}
 
 	// Analyze query complexity
-	plan.Complexity = qp.analyzeComplexity(searchReq.Query)
+	plan.Complexity = qp.analyzeComplexity(searchReq.ParsedQuery)
 
 	// Optimize query
-	optimizedQuery := qp.optimizeQuery(searchReq.Query)
+	optimizedQuery := qp.optimizeQuery(searchReq.ParsedQuery)
 	plan.OptimizedQuery = optimizedQuery
 
 	// Determine target shards
@@ -125,68 +125,68 @@ func (qp *QueryPlanner) PlanQuery(ctx context.Context, indexName string, searchR
 }
 
 // analyzeComplexity estimates the computational complexity of a query (0-100)
-func (qp *QueryPlanner) analyzeComplexity(query *parser.Query) int {
+func (qp *QueryPlanner) analyzeComplexity(query parser.Query) int {
 	if query == nil {
 		return 1 // match_all
 	}
 
 	complexity := 0
 
-	switch query.Type {
-	case parser.QueryTypeMatchAll:
+	// Use type switch to handle different query types
+	switch q := query.(type) {
+	case *parser.MatchAllQuery:
 		complexity = 1
 
-	case parser.QueryTypeMatch, parser.QueryTypeTerm:
+	case *parser.MatchQuery, *parser.TermQuery:
 		complexity = 10
 
-	case parser.QueryTypeTerms:
-		termsQuery := query.Terms
-		if termsQuery != nil && len(termsQuery.Values) > 0 {
-			complexity = 10 + len(termsQuery.Values)
+	case *parser.TermsQuery:
+		if len(q.Values) > 0 {
+			complexity = 10 + len(q.Values)
 		}
 
-	case parser.QueryTypeRange:
+	case *parser.RangeQuery:
 		complexity = 15
 
-	case parser.QueryTypeBool:
-		boolQuery := query.Bool
-		if boolQuery != nil {
-			// Add complexity for each clause
-			complexity = 5
-			for _, must := range boolQuery.Must {
-				complexity += qp.analyzeComplexity(must)
-			}
-			for _, should := range boolQuery.Should {
-				complexity += qp.analyzeComplexity(should) / 2 // Should is less critical
-			}
-			for _, mustNot := range boolQuery.MustNot {
-				complexity += qp.analyzeComplexity(mustNot)
-			}
-			for _, filter := range boolQuery.Filter {
-				complexity += qp.analyzeComplexity(filter)
-			}
+	case *parser.BoolQuery:
+		// Add complexity for each clause
+		complexity = 5
+		for _, must := range q.Must {
+			complexity += qp.analyzeComplexity(must)
+		}
+		for _, should := range q.Should {
+			complexity += qp.analyzeComplexity(should) / 2 // Should is less critical
+		}
+		for _, mustNot := range q.MustNot {
+			complexity += qp.analyzeComplexity(mustNot)
+		}
+		for _, filter := range q.Filter {
+			complexity += qp.analyzeComplexity(filter)
 		}
 
-	case parser.QueryTypeWildcard, parser.QueryTypeRegexp:
+	case *parser.WildcardQuery, *parser.QueryStringQuery:
 		complexity = 30 // Expensive operations
 
-	case parser.QueryTypeFuzzy:
+	case *parser.FuzzyQuery:
 		complexity = 40 // Very expensive
 
-	case parser.QueryTypePrefix:
+	case *parser.PrefixQuery:
 		complexity = 20
 
-	case parser.QueryTypeMatchPhrase:
+	case *parser.MatchPhraseQuery:
 		complexity = 25
 
-	case parser.QueryTypeMultiMatch:
-		multiMatch := query.MultiMatch
-		if multiMatch != nil {
-			complexity = 15 * len(multiMatch.Fields)
-		}
+	case *parser.MultiMatchQuery:
+		complexity = 15 * len(q.Fields)
 
-	case parser.QueryTypeExists:
+	case *parser.ExistsQuery:
 		complexity = 10
+
+	case *parser.ExpressionQuery:
+		complexity = 50 // Expression queries can be complex
+
+	case *parser.WasmUDFQuery:
+		complexity = 60 // WASM UDFs can be very complex
 
 	default:
 		complexity = 20
@@ -201,28 +201,29 @@ func (qp *QueryPlanner) analyzeComplexity(query *parser.Query) int {
 }
 
 // optimizeQuery applies optimization rules to the query
-func (qp *QueryPlanner) optimizeQuery(query *parser.Query) *parser.Query {
+func (qp *QueryPlanner) optimizeQuery(query parser.Query) parser.Query {
 	if query == nil {
 		return query
 	}
 
-	// Create a copy to avoid modifying the original
-	optimized := *query
-
-	switch query.Type {
-	case parser.QueryTypeBool:
+	// Use type switch to optimize different query types
+	switch q := query.(type) {
+	case *parser.BoolQuery:
 		// Optimize boolean queries
-		optimized.Bool = qp.optimizeBoolQuery(query.Bool)
+		return qp.optimizeBoolQuery(q)
 
-	case parser.QueryTypeTerms:
+	case *parser.TermsQuery:
 		// Optimize terms queries with many values
-		if query.Terms != nil && len(query.Terms.Values) > 1000 {
+		if len(q.Values) > 1000 {
 			qp.logger.Warn("Large terms query detected",
-				zap.Int("values_count", len(query.Terms.Values)))
+				zap.Int("values_count", len(q.Values)))
 		}
-	}
+		return q
 
-	return &optimized
+	default:
+		// No optimization needed for other query types
+		return query
+	}
 }
 
 // optimizeBoolQuery optimizes boolean queries
@@ -232,11 +233,12 @@ func (qp *QueryPlanner) optimizeBoolQuery(boolQuery *parser.BoolQuery) *parser.B
 	}
 
 	optimized := &parser.BoolQuery{
-		Must:              make([]*parser.Query, 0, len(boolQuery.Must)),
-		Should:            make([]*parser.Query, 0, len(boolQuery.Should)),
-		MustNot:           make([]*parser.Query, 0, len(boolQuery.MustNot)),
-		Filter:            make([]*parser.Query, 0, len(boolQuery.Filter)),
-		MinimumShouldMatch: boolQuery.MinimumShouldMatch,
+		Must:                   make([]parser.Query, 0, len(boolQuery.Must)),
+		Should:                 make([]parser.Query, 0, len(boolQuery.Should)),
+		MustNot:                make([]parser.Query, 0, len(boolQuery.MustNot)),
+		Filter:                 make([]parser.Query, 0, len(boolQuery.Filter)),
+		MinimumShouldMatch:     boolQuery.MinimumShouldMatch,
+		MinimumShouldMatchStr:  boolQuery.MinimumShouldMatchStr,
 	}
 
 	// Move filters before must clauses (filters are faster)
@@ -305,8 +307,13 @@ func (qp *QueryPlanner) isCacheable(searchReq *parser.SearchRequest) bool {
 		return false // Deep pagination shouldn't be cached
 	}
 
-	if searchReq.Query == nil || searchReq.Query.Type == parser.QueryTypeMatchAll {
-		return false // Match all changes frequently
+	// Check if it's a match_all query (which changes frequently)
+	if _, isMatchAll := searchReq.ParsedQuery.(*parser.MatchAllQuery); isMatchAll {
+		return false
+	}
+
+	if searchReq.ParsedQuery == nil {
+		return false
 	}
 
 	return true
@@ -335,53 +342,49 @@ type OptimizationHint struct {
 }
 
 // AnalyzeQuery provides optimization hints for a query
-func (qp *QueryPlanner) AnalyzeQuery(query *parser.Query) []*OptimizationHint {
+func (qp *QueryPlanner) AnalyzeQuery(query parser.Query) []*OptimizationHint {
 	hints := make([]*OptimizationHint, 0)
 
 	if query == nil {
 		return hints
 	}
 
-	// Check for wildcard/regexp queries
-	if query.Type == parser.QueryTypeWildcard || query.Type == parser.QueryTypeRegexp {
+	// Use type switch to check for different query types
+	switch q := query.(type) {
+	case *parser.WildcardQuery, *parser.QueryStringQuery:
 		hints = append(hints, &OptimizationHint{
 			Type:        "expensive_query",
 			Description: "Wildcard and regexp queries are expensive. Consider using prefix or term queries.",
 			Severity:    "warning",
 		})
-	}
 
-	// Check for fuzzy queries
-	if query.Type == parser.QueryTypeFuzzy {
+	case *parser.FuzzyQuery:
 		hints = append(hints, &OptimizationHint{
 			Type:        "expensive_query",
 			Description: "Fuzzy queries are very expensive. Consider reducing the fuzziness parameter.",
 			Severity:    "warning",
 		})
-	}
 
-	// Check for large terms queries
-	if query.Type == parser.QueryTypeTerms && query.Terms != nil && len(query.Terms.Values) > 100 {
-		hints = append(hints, &OptimizationHint{
-			Type:        "large_terms_query",
-			Description: fmt.Sprintf("Terms query has %d values. Consider using a different approach.", len(query.Terms.Values)),
-			Severity:    "warning",
-		})
-	}
-
-	// Check bool query structure
-	if query.Type == parser.QueryTypeBool && query.Bool != nil {
+	case *parser.TermsQuery:
+		if len(q.Values) > 100 {
+			hints = append(hints, &OptimizationHint{
+				Type:        "large_terms_query",
+				Description: fmt.Sprintf("Terms query has %d values. Consider using a different approach.", len(q.Values)),
+				Severity:    "warning",
+			})
+		}
+	case *parser.BoolQuery:
 		// Check for excessive should clauses
-		if len(query.Bool.Should) > 20 {
+		if len(q.Should) > 20 {
 			hints = append(hints, &OptimizationHint{
 				Type:        "complex_bool_query",
-				Description: fmt.Sprintf("Bool query has %d should clauses. Consider simplifying.", len(query.Bool.Should)),
+				Description: fmt.Sprintf("Bool query has %d should clauses. Consider simplifying.", len(q.Should)),
 				Severity:    "info",
 			})
 		}
 
 		// Suggest moving non-scoring clauses to filter
-		if len(query.Bool.Must) > 0 {
+		if len(q.Must) > 0 {
 			hints = append(hints, &OptimizationHint{
 				Type:        "filter_suggestion",
 				Description: "Consider using 'filter' instead of 'must' for clauses that don't need scoring.",

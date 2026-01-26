@@ -192,9 +192,9 @@ func TestRegisterDataNode(t *testing.T) {
 	}
 
 	nodeID := dataNode.Config.NodeID
-	nodeType := dataNode.Config.NodeType
+	nodeType := "data" // DataNodeConfig doesn't have NodeType field
 	bindAddr := dataNode.Config.BindAddr
-	grpcPort := dataNode.Config.GRPCPort
+	grpcPort := int32(dataNode.Config.GRPCPort)
 
 	if err := leader.Node.RegisterNode(ctx, nodeID, nodeType, bindAddr, grpcPort); err != nil {
 		t.Fatalf("Failed to register node: %v", err)

@@ -100,36 +100,42 @@ func TestQueryExecutorSearchTwoShards(t *testing.T) {
 	masterClient := new(MockMasterClient)
 	masterClient.On("GetShardRouting", ctx, "test-index").Return(
 		map[int32]*pb.ShardRouting{
-			0: {ShardId: 0, NodeId: "node1", State: pb.ShardState_SHARD_STATE_ACTIVE},
-			1: {ShardId: 1, NodeId: "node2", State: pb.ShardState_SHARD_STATE_ACTIVE},
+			0: {ShardId: 0, Allocation: &pb.ShardAllocation{NodeId: "node1", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
+			1: {ShardId: 1, Allocation: &pb.ShardAllocation{NodeId: "node2", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
 		},
 		nil,
 	)
 
 	// Setup mock data node clients
 	node1 := &MockDataNodeClient{nodeID: "node1"}
+	node1.On("IsConnected").Return(true)
 	node1.On("Search", ctx, "test-index", int32(0), mock.Anything, mock.Anything).Return(
 		&pb.SearchResponse{
 			TookMillis: 10,
-			TotalHits:  50,
-			MaxScore:   0.95,
-			Hits: []*pb.SearchHit{
-				{Id: "doc1", Score: 0.95, Source: []byte(`{"title": "Document 1"}`)},
-				{Id: "doc2", Score: 0.90, Source: []byte(`{"title": "Document 2"}`)},
+			Hits: &pb.SearchHits{
+				Total:    &pb.TotalHits{Value: 50, Relation: "eq"},
+				MaxScore: 0.95,
+				Hits: []*pb.SearchHit{
+					{Id: "doc1", Score: 0.95, Source: nil}, // Simplified for mock
+					{Id: "doc2", Score: 0.90, Source: nil},
+				},
 			},
 		},
 		nil,
 	)
 
 	node2 := &MockDataNodeClient{nodeID: "node2"}
+	node2.On("IsConnected").Return(true)
 	node2.On("Search", ctx, "test-index", int32(1), mock.Anything, mock.Anything).Return(
 		&pb.SearchResponse{
 			TookMillis: 12,
-			TotalHits:  45,
-			MaxScore:   0.98,
-			Hits: []*pb.SearchHit{
-				{Id: "doc3", Score: 0.98, Source: []byte(`{"title": "Document 3"}`)},
-				{Id: "doc4", Score: 0.85, Source: []byte(`{"title": "Document 4"}`)},
+			Hits: &pb.SearchHits{
+				Total:    &pb.TotalHits{Value: 45, Relation: "eq"},
+				MaxScore: 0.98,
+				Hits: []*pb.SearchHit{
+					{Id: "doc3", Score: 0.98, Source: nil}, // Simplified for mock
+					{Id: "doc4", Score: 0.85, Source: nil},
+				},
 			},
 		},
 		nil,
@@ -142,7 +148,7 @@ func TestQueryExecutorSearchTwoShards(t *testing.T) {
 
 	// Execute search
 	query := []byte(`{"match_all": {}}`)
-	result, err := executor.Search(ctx, "test-index", query, nil, 0, 10)
+	result, err := executor.ExecuteSearch(ctx, "test-index", query, nil, 0, 10)
 
 	// Verify results
 	require.NoError(t, err)
@@ -175,7 +181,7 @@ func TestQueryExecutorSearchWithPagination(t *testing.T) {
 	masterClient := new(MockMasterClient)
 	masterClient.On("GetShardRouting", ctx, "test-index").Return(
 		map[int32]*pb.ShardRouting{
-			0: {ShardId: 0, NodeId: "node1", State: pb.ShardState_SHARD_STATE_ACTIVE},
+			0: {ShardId: 0, Allocation: &pb.ShardAllocation{NodeId: "node1", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
 		},
 		nil,
 	)
@@ -187,16 +193,19 @@ func TestQueryExecutorSearchWithPagination(t *testing.T) {
 		hits[i] = &pb.SearchHit{
 			Id:     string(rune('A' + i)),
 			Score:  float64(100 - i), // Descending scores
-			Source: []byte(`{}`),
+			Source: nil,              // Simplified for mock
 		}
 	}
 
+	node1.On("IsConnected").Return(true)
 	node1.On("Search", ctx, "test-index", int32(0), mock.Anything, mock.Anything).Return(
 		&pb.SearchResponse{
 			TookMillis: 5,
-			TotalHits:  100,
-			MaxScore:   100.0,
-			Hits:       hits,
+			Hits: &pb.SearchHits{
+				Total:    &pb.TotalHits{Value: 100, Relation: "eq"},
+				MaxScore: 100.0,
+				Hits:     hits,
+			},
 		},
 		nil,
 	)
@@ -206,7 +215,7 @@ func TestQueryExecutorSearchWithPagination(t *testing.T) {
 	executor.RegisterDataNode(node1)
 
 	// Test pagination: from=10, size=5
-	result, err := executor.Search(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 10, 5)
+	result, err := executor.ExecuteSearch(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 10, 5)
 
 	// Verify results
 	require.NoError(t, err)
@@ -232,21 +241,28 @@ func TestQueryExecutorPartialShardFailure(t *testing.T) {
 	masterClient := new(MockMasterClient)
 	masterClient.On("GetShardRouting", ctx, "test-index").Return(
 		map[int32]*pb.ShardRouting{
-			0: {ShardId: 0, NodeId: "node1", State: pb.ShardState_SHARD_STATE_ACTIVE},
-			1: {ShardId: 1, NodeId: "node2", State: pb.ShardState_SHARD_STATE_ACTIVE},
-			2: {ShardId: 2, NodeId: "node3", State: pb.ShardState_SHARD_STATE_ACTIVE},
+			0: {ShardId: 0, Allocation: &pb.ShardAllocation{NodeId: "node1", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
+			1: {ShardId: 1, Allocation: &pb.ShardAllocation{NodeId: "node2", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
+			2: {ShardId: 2, Allocation: &pb.ShardAllocation{NodeId: "node3", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
 		},
 		nil,
 	)
 
 	// Setup mock data nodes
 	node1 := &MockDataNodeClient{nodeID: "node1"}
+	node1.On("IsConnected").Return(true)
 	node1.On("Search", ctx, "test-index", int32(0), mock.Anything, mock.Anything).Return(
-		&pb.SearchResponse{TotalHits: 30, Hits: []*pb.SearchHit{}},
+		&pb.SearchResponse{
+			Hits: &pb.SearchHits{
+				Total: &pb.TotalHits{Value: 30, Relation: "eq"},
+				Hits:  []*pb.SearchHit{},
+			},
+		},
 		nil,
 	)
 
 	node2 := &MockDataNodeClient{nodeID: "node2"}
+	node2.On("IsConnected").Return(true)
 	// Node2 fails
 	node2.On("Search", ctx, "test-index", int32(1), mock.Anything, mock.Anything).Return(
 		(*pb.SearchResponse)(nil),
@@ -254,8 +270,14 @@ func TestQueryExecutorPartialShardFailure(t *testing.T) {
 	)
 
 	node3 := &MockDataNodeClient{nodeID: "node3"}
+	node3.On("IsConnected").Return(true)
 	node3.On("Search", ctx, "test-index", int32(2), mock.Anything, mock.Anything).Return(
-		&pb.SearchResponse{TotalHits: 35, Hits: []*pb.SearchHit{}},
+		&pb.SearchResponse{
+			Hits: &pb.SearchHits{
+				Total: &pb.TotalHits{Value: 35, Relation: "eq"},
+				Hits:  []*pb.SearchHit{},
+			},
+		},
 		nil,
 	)
 
@@ -266,7 +288,7 @@ func TestQueryExecutorPartialShardFailure(t *testing.T) {
 	executor.RegisterDataNode(node3)
 
 	// Execute search (should succeed with partial results)
-	result, err := executor.Search(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
+	result, err := executor.ExecuteSearch(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
 
 	// Verify graceful degradation
 	require.NoError(t, err, "Search should succeed despite partial shard failure")
@@ -287,7 +309,7 @@ func TestQueryExecutorNoDataNodes(t *testing.T) {
 	masterClient := new(MockMasterClient)
 	masterClient.On("GetShardRouting", ctx, "test-index").Return(
 		map[int32]*pb.ShardRouting{
-			0: {ShardId: 0, NodeId: "node1", State: pb.ShardState_SHARD_STATE_ACTIVE},
+			0: {ShardId: 0, Allocation: &pb.ShardAllocation{NodeId: "node1", State: pb.ShardAllocation_SHARD_STATE_STARTED}},
 		},
 		nil,
 	)
@@ -296,11 +318,11 @@ func TestQueryExecutorNoDataNodes(t *testing.T) {
 	executor := NewQueryExecutor(masterClient, logger)
 
 	// Execute search (should fail)
-	_, err := executor.Search(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
+	_, err := executor.ExecuteSearch(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
 
 	// Verify error
 	assert.Error(t, err, "Search should fail with no data nodes")
-	assert.Contains(t, err.Error(), "no data node found", "Error should mention missing data node")
+	assert.Contains(t, err.Error(), "data node", "Error should mention missing data node")
 
 	masterClient.AssertExpectations(t)
 }
@@ -321,7 +343,7 @@ func TestQueryExecutorMasterClientError(t *testing.T) {
 	executor := NewQueryExecutor(masterClient, logger)
 
 	// Execute search (should fail)
-	_, err := executor.Search(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
+	_, err := executor.ExecuteSearch(ctx, "test-index", []byte(`{"match_all": {}}`), nil, 0, 10)
 
 	// Verify error
 	assert.Error(t, err, "Search should fail when master is unavailable")

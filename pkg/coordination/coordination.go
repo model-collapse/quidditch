@@ -594,11 +594,7 @@ func (c *CoordinationNode) handleIndexDocument(ctx *gin.Context) {
 		"_id":      docID,
 		"_version": resp.Version,
 		"result":   result,
-		"_shards": gin.H{
-			"total":      resp.Shards.Total,
-			"successful": resp.Shards.Successful,
-			"failed":     resp.Shards.Failed,
-		},
+		// TODO: Add shard information once proto is updated with Shards field
 	})
 }
 
@@ -639,7 +635,7 @@ func (c *CoordinationNode) handleGetDocument(ctx *gin.Context) {
 		"_id":      docID,
 		"_version": resp.Version,
 		"found":    resp.Found,
-		"_source":  resp.Source.AsMap(),
+		"_source":  resp.Document.AsMap(),
 	})
 }
 
@@ -675,16 +671,16 @@ func (c *CoordinationNode) handleDeleteDocument(ctx *gin.Context) {
 	}
 
 	// Return success response
+	result := "deleted"
+	if !resp.Found {
+		result = "not_found"
+	}
 	ctx.JSON(http.StatusOK, gin.H{
-		"_index":   indexName,
-		"_id":      docID,
-		"_version": resp.Version,
-		"result":   "deleted",
-		"_shards": gin.H{
-			"total":      resp.Shards.Total,
-			"successful": resp.Shards.Successful,
-			"failed":     resp.Shards.Failed,
-		},
+		"_index": indexName,
+		"_id":    docID,
+		"result": result,
+		"found":  resp.Found,
+		// TODO: Add version and shard information once proto is updated
 	})
 }
 
@@ -745,11 +741,7 @@ func (c *CoordinationNode) handleUpdateDocument(ctx *gin.Context) {
 		"_id":      docID,
 		"_version": resp.Version,
 		"result":   "updated",
-		"_shards": gin.H{
-			"total":      resp.Shards.Total,
-			"successful": resp.Shards.Successful,
-			"failed":     resp.Shards.Failed,
-		},
+		// TODO: Add shard information once proto is updated with Shards field
 	})
 }
 
@@ -861,11 +853,12 @@ func (c *CoordinationNode) executeBulkOperation(ctx context.Context, op *bulk.Bu
 				result.itemResult.Result = "created"
 			}
 			result.itemResult.Version = resp.Version
-			result.itemResult.Shards = &bulk.BulkItemShards{
-				Total:      resp.Shards.Total,
-				Successful: resp.Shards.Successful,
-				Failed:     resp.Shards.Failed,
-			}
+			// TODO: Add shard information once proto is updated with Shards field
+			// result.itemResult.Shards = &bulk.BulkItemShards{
+			// 	Total:      1,
+			// 	Successful: 1,
+			// 	Failed:     0,
+			// }
 		}
 
 	case bulk.OperationUpdate:
@@ -891,11 +884,12 @@ func (c *CoordinationNode) executeBulkOperation(ctx context.Context, op *bulk.Bu
 			result.itemResult.Status = http.StatusOK
 			result.itemResult.Result = "updated"
 			result.itemResult.Version = resp.Version
-			result.itemResult.Shards = &bulk.BulkItemShards{
-				Total:      resp.Shards.Total,
-				Successful: resp.Shards.Successful,
-				Failed:     resp.Shards.Failed,
-			}
+			// TODO: Add shard information once proto is updated with Shards field
+			// result.itemResult.Shards = &bulk.BulkItemShards{
+			// 	Total:      1,
+			// 	Successful: 1,
+			// 	Failed:     0,
+			// }
 		}
 
 	case bulk.OperationDelete:
@@ -919,14 +913,20 @@ func (c *CoordinationNode) executeBulkOperation(ctx context.Context, op *bulk.Bu
 				}
 			}
 		} else {
-			result.itemResult.Status = http.StatusOK
-			result.itemResult.Result = "deleted"
-			result.itemResult.Version = resp.Version
-			result.itemResult.Shards = &bulk.BulkItemShards{
-				Total:      resp.Shards.Total,
-				Successful: resp.Shards.Successful,
-				Failed:     resp.Shards.Failed,
+			// Check if document was found
+			if !resp.Found {
+				result.itemResult.Status = http.StatusNotFound
+				result.itemResult.Result = "not_found"
+			} else {
+				result.itemResult.Status = http.StatusOK
+				result.itemResult.Result = "deleted"
 			}
+			// TODO: Add version and shard information once proto is updated
+			// result.itemResult.Shards = &bulk.BulkItemShards{
+			// 	Total:      1,
+			// 	Successful: 1,
+			// 	Failed:     0,
+			// }
 		}
 
 	default:

@@ -38,10 +38,14 @@ func (qe *QueryExecutor) aggregateSearchResults(responses []*pb.SearchResponse, 
 		// Collect hits
 		if resp.Hits != nil {
 			for _, hit := range resp.Hits.Hits {
+				var sourceMap map[string]interface{}
+				if hit.Source != nil {
+					sourceMap = hit.Source.AsMap()
+				}
 				allHits = append(allHits, &SearchHit{
 					ID:     hit.Id,
 					Score:  hit.Score,
-					Source: hit.Source.AsMap(),
+					Source: sourceMap,
 				})
 			}
 		}

@@ -121,6 +121,14 @@ func (qe *QueryExecutor) UnregisterDataNode(nodeID string) {
 	qe.logger.Info("Unregistered data node client", zap.String("node_id", nodeID))
 }
 
+// HasDataNodeClient checks if a data node client is registered
+func (qe *QueryExecutor) HasDataNodeClient(nodeID string) bool {
+	qe.mu.RLock()
+	defer qe.mu.RUnlock()
+	_, exists := qe.dataClients[nodeID]
+	return exists
+}
+
 // ExecuteSearch executes a search query across all relevant shards
 func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, query []byte, filterExpression []byte, from, size int) (*SearchResult, error) {
 	startTime := time.Now()
