@@ -11,6 +11,16 @@ import (
 	"go.uber.org/zap"
 )
 
+// Note: These tests validate SINGLE-NODE distributed search across LOCAL shards only.
+// The Diagon C++ engine distributes queries across multiple shards within a single DataNode.
+//
+// For MULTI-NODE distributed search (queries distributed across physical DataNodes via gRPC),
+// see test/integration/distributed_search_test.go and related integration tests.
+//
+// Architecture:
+// - Single-Node (this file): Go → DistributedCoordinator (C++) → Multiple local shards
+// - Multi-Node (integration): Coordination → QueryExecutor (Go) → Multiple DataNodes (gRPC)
+
 // TestShardManagerBasics tests basic shard manager functionality
 func TestShardManagerBasics(t *testing.T) {
 	logger := zap.NewNop()
