@@ -275,10 +275,42 @@ func (qe *QueryExecutor) ExecuteCount(ctx context.Context, indexName string, que
 
 // SearchResult represents aggregated search results
 type SearchResult struct {
-	TookMillis int64
-	TotalHits  int64
-	MaxScore   float64
-	Hits       []*SearchHit
+	TookMillis   int64
+	TotalHits    int64
+	MaxScore     float64
+	Hits         []*SearchHit
+	Aggregations map[string]*AggregationResult
+}
+
+// AggregationResult represents an aggregation result
+type AggregationResult struct {
+	Type    string
+	Buckets []*AggregationBucket
+
+	// Stats/Extended Stats fields
+	Count                     int64
+	Min                       float64
+	Max                       float64
+	Avg                       float64
+	Sum                       float64
+	SumOfSquares              float64
+	Variance                  float64
+	StdDeviation              float64
+	StdDeviationBoundsUpper   float64
+	StdDeviationBoundsLower   float64
+
+	// Percentiles field
+	Values map[string]float64
+
+	// Cardinality field
+	Value int64
+}
+
+// AggregationBucket represents a bucket in a bucket aggregation
+type AggregationBucket struct {
+	Key        string
+	NumericKey float64
+	DocCount   int64
 }
 
 // SearchHit represents a single search hit
