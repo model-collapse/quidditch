@@ -1,0 +1,163 @@
+run:
+  timeout: 5m
+  tests: true
+  modules-download-mode: readonly
+
+linters:
+  enable:
+    # Enabled by default
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+
+    # Additional recommended linters
+    - gofmt
+    - goimports
+    - gocritic
+    - revive
+    - misspell
+    - unconvert
+    - unparam
+    - whitespace
+    - gocyclo
+    - gocognit
+    - dupl
+    - bodyclose
+    - nilerr
+    - nolintlint
+    - exportloopref
+    - goconst
+    - godot
+    - gosec
+    - errname
+    - errorlint
+    - predeclared
+    - stylecheck
+    - tparallel
+
+  disable:
+    - gomnd # Magic numbers are sometimes necessary
+    - exhaustive # Too strict for switch statements
+    - exhaustruct # Too strict for struct initialization
+    - wrapcheck # Too noisy
+    - paralleltest # Not all tests need to be parallel
+    - testpackage # Tests in same package are fine
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+
+  govet:
+    enable-all: true
+    disable:
+      - shadow # Too noisy
+
+  gocyclo:
+    min-complexity: 15
+
+  gocognit:
+    min-complexity: 20
+
+  dupl:
+    threshold: 100
+
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+
+  misspell:
+    locale: US
+
+  lll:
+    line-length: 120
+
+  unparam:
+    check-exported: false
+
+  nakedret:
+    max-func-lines: 30
+
+  revive:
+    rules:
+      - name: exported
+        disabled: false
+      - name: package-comments
+        disabled: true # Not all packages need comments
+      - name: var-naming
+        disabled: false
+      - name: unexported-return
+        disabled: false
+      - name: errorf
+        disabled: false
+      - name: blank-imports
+        disabled: false
+      - name: context-as-argument
+        disabled: false
+      - name: dot-imports
+        disabled: false
+      - name: error-return
+        disabled: false
+      - name: error-strings
+        disabled: false
+      - name: error-naming
+        disabled: false
+      - name: increment-decrement
+        disabled: false
+      - name: var-declaration
+        disabled: false
+      - name: range
+        disabled: false
+      - name: receiver-naming
+        disabled: false
+      - name: time-naming
+        disabled: false
+      - name: indent-error-flow
+        disabled: false
+      - name: superfluous-else
+        disabled: false
+
+  gosec:
+    excludes:
+      - G404 # Insecure random number source - OK for non-crypto use
+    severity: medium
+    confidence: medium
+
+  stylecheck:
+    checks: ["all", "-ST1000", "-ST1003"] # Allow missing package comments
+
+issues:
+  exclude-rules:
+    # Exclude some linters from running on tests files
+    - path: _test\.go
+      linters:
+        - gocyclo
+        - errcheck
+        - dupl
+        - gosec
+        - goconst
+
+    # Ignore long lines in go:generate
+    - linters:
+        - lll
+      source: "^//go:generate "
+
+    # Allow shadowing in short variable declarations
+    - linters:
+        - govet
+      text: "shadow: declaration of"
+
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+  # Show only new issues
+  new: false
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  sort-results: true

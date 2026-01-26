@@ -1,0 +1,233 @@
+version: '3.9'
+
+services:
+  # Master Node 1 (Bootstrap)
+  master-1:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.master
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
+        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    image: quidditch/master:${VERSION:-latest}
+    container_name: quidditch-master-1
+    hostname: master-1
+    environment:
+      - NODE_ID=master-1
+      - RAFT_PEERS=master-1:9300,master-2:9300,master-3:9300
+      - BOOTSTRAP=true
+      - CLUSTER_NAME=quidditch-dev
+      - LOG_LEVEL=debug
+    ports:
+      - "9300:9300"  # Raft
+      - "9301:9301"  # gRPC
+      - "9400:9400"  # Metrics
+    volumes:
+      - master-1-data:/data
+      - ../../config/docker-master.yaml:/etc/quidditch/master.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/quidditch-master", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Master Node 2
+  master-2:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.master
+    image: quidditch/master:${VERSION:-latest}
+    container_name: quidditch-master-2
+    hostname: master-2
+    environment:
+      - NODE_ID=master-2
+      - RAFT_PEERS=master-1:9300,master-2:9300,master-3:9300
+      - BOOTSTRAP=false
+      - CLUSTER_NAME=quidditch-dev
+      - LOG_LEVEL=debug
+    ports:
+      - "9310:9300"  # Raft
+      - "9311:9301"  # gRPC
+      - "9410:9400"  # Metrics
+    volumes:
+      - master-2-data:/data
+      - ../../config/docker-master.yaml:/etc/quidditch/master.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    depends_on:
+      - master-1
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/quidditch-master", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Master Node 3
+  master-3:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.master
+    image: quidditch/master:${VERSION:-latest}
+    container_name: quidditch-master-3
+    hostname: master-3
+    environment:
+      - NODE_ID=master-3
+      - RAFT_PEERS=master-1:9300,master-2:9300,master-3:9300
+      - BOOTSTRAP=false
+      - CLUSTER_NAME=quidditch-dev
+      - LOG_LEVEL=debug
+    ports:
+      - "9320:9300"  # Raft
+      - "9321:9301"  # gRPC
+      - "9420:9400"  # Metrics
+    volumes:
+      - master-3-data:/data
+      - ../../config/docker-master.yaml:/etc/quidditch/master.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    depends_on:
+      - master-1
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/quidditch-master", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Coordination Node
+  coordination-1:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.coordination
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
+        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    image: quidditch/coordination:${VERSION:-latest}
+    container_name: quidditch-coordination-1
+    hostname: coordination-1
+    environment:
+      - NODE_ID=coord-1
+      - MASTER_ADDR=master-1:9301
+      - CLUSTER_NAME=quidditch-dev
+      - LOG_LEVEL=debug
+    ports:
+      - "9200:9200"  # REST API
+    volumes:
+      - ../../config/docker-coordination.yaml:/etc/quidditch/coordination.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    depends_on:
+      - master-1
+      - master-2
+      - master-3
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # Data Node 1
+  data-1:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.data
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_DATE: ${BUILD_DATE:-$(date -u +"%Y-%m-%dT%H:%M:%SZ")}
+        VCS_REF: ${VCS_REF:-$(git rev-parse --short HEAD)}
+    image: quidditch/data:${VERSION:-latest}
+    container_name: quidditch-data-1
+    hostname: data-1
+    environment:
+      - NODE_ID=data-1
+      - MASTER_ADDR=master-1:9301
+      - STORAGE_TIER=hot
+      - MAX_SHARDS=100
+      - LOG_LEVEL=debug
+      - DIAGON_ENABLED=false
+      - NUM_THREADS=4
+      - MAX_MEMORY=2GB
+    ports:
+      - "9303:9303"  # gRPC
+    volumes:
+      - data-1-data:/data
+      - ../../config/docker-data.yaml:/etc/quidditch/data.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    depends_on:
+      - master-1
+      - master-2
+      - master-3
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/quidditch-data", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Data Node 2
+  data-2:
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.data
+    image: quidditch/data:${VERSION:-latest}
+    container_name: quidditch-data-2
+    hostname: data-2
+    environment:
+      - NODE_ID=data-2
+      - MASTER_ADDR=master-1:9301
+      - STORAGE_TIER=hot
+      - MAX_SHARDS=100
+      - LOG_LEVEL=debug
+      - DIAGON_ENABLED=false
+      - NUM_THREADS=4
+      - MAX_MEMORY=2GB
+    ports:
+      - "9313:9303"  # gRPC
+    volumes:
+      - data-2-data:/data
+      - ../../config/docker-data.yaml:/etc/quidditch/data.yaml:ro
+    networks:
+      - quidditch
+    restart: unless-stopped
+    depends_on:
+      - master-1
+      - master-2
+      - master-3
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/quidditch-data", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  quidditch:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  master-1-data:
+    driver: local
+  master-2-data:
+    driver: local
+  master-3-data:
+    driver: local
+  data-1-data:
+    driver: local
+  data-2-data:
+    driver: local

@@ -1,0 +1,69 @@
+# Quidditch Data Node Configuration (Docker)
+
+# Node identification
+node_id: ${NODE_ID:-data-1}
+node_type: "data"
+
+# Network binding
+bind_addr: "0.0.0.0"
+
+# gRPC API configuration
+grpc_port: 9303
+
+# Master node connection
+master_addr: ${MASTER_ADDR:-master-1:9301}
+heartbeat_interval: "30s"
+registration_timeout: "10s"
+
+# Data storage
+data_dir: "/data/shards"
+
+# Storage configuration
+storage:
+  tier: ${STORAGE_TIER:-hot}
+  max_shards: ${MAX_SHARDS:-100}
+  max_disk_usage: "90%"
+
+# Logging
+log_level: ${LOG_LEVEL:-info}
+log_format: "json"
+
+# Diagon engine settings
+diagon:
+  # Set to true when Diagon C++ core is available
+  enabled: ${DIAGON_ENABLED:-false}
+
+  # Thread pool
+  num_threads: ${NUM_THREADS:-4}
+
+  # Memory limits
+  max_memory: ${MAX_MEMORY:-4GB}
+  buffer_pool_size: "1GB"
+
+  # Cache settings
+  cache_size: "512MB"
+
+  # SIMD optimization
+  simd_enabled: true
+
+# Shard management
+shard:
+  refresh_interval: "1s"
+  flush_interval: "30s"
+  merge_policy: "tiered"
+  max_merge_at_once: 10
+
+# Query execution
+query:
+  timeout: "30s"
+  max_concurrent: 50
+
+# Resource limits
+max_concurrent_requests: 100
+request_timeout: "30s"
+
+# Performance tuning
+performance:
+  io_threads: 2
+  indexing_threads: ${INDEXING_THREADS:-2}
+  search_threads: ${SEARCH_THREADS:-4}

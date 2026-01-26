@@ -1,0 +1,250 @@
+syntax = "proto3";
+
+package quidditch.data;
+
+option go_package = "github.com/quidditch/quidditch/pkg/common/proto";
+
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+// DataService manages shards and document operations on data nodes
+service DataService {
+  // Shard lifecycle management
+  rpc CreateShard(CreateShardRequest) returns (CreateShardResponse);
+  rpc DeleteShard(DeleteShardRequest) returns (DeleteShardResponse);
+  rpc GetShardInfo(GetShardInfoRequest) returns (ShardInfo);
+  rpc RefreshShard(RefreshShardRequest) returns (RefreshShardResponse);
+  rpc FlushShard(FlushShardRequest) returns (FlushShardResponse);
+
+  // Document operations
+  rpc IndexDocument(IndexDocumentRequest) returns (IndexDocumentResponse);
+  rpc GetDocument(GetDocumentRequest) returns (GetDocumentResponse);
+  rpc DeleteDocument(DeleteDocumentRequest) returns (DeleteDocumentResponse);
+  rpc BulkIndex(BulkIndexRequest) returns (BulkIndexResponse);
+
+  // Search operations
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc Count(CountRequest) returns (CountResponse);
+
+  // Statistics and health
+  rpc GetShardStats(GetShardStatsRequest) returns (ShardStats);
+  rpc GetNodeStats(GetNodeStatsRequest) returns (DataNodeStats);
+}
+
+// Shard Management Messages
+
+message CreateShardRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bool is_primary = 3;
+  map<string, string> settings = 4;
+}
+
+message CreateShardResponse {
+  bool acknowledged = 1;
+  string shard_key = 2;
+}
+
+message DeleteShardRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+}
+
+message DeleteShardResponse {
+  bool acknowledged = 1;
+}
+
+message GetShardInfoRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+}
+
+message ShardInfo {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bool is_primary = 3;
+  ShardState state = 4;
+  int64 docs_count = 5;
+  int64 size_bytes = 6;
+  google.protobuf.Timestamp created_at = 7;
+  google.protobuf.Timestamp last_updated = 8;
+
+  enum ShardState {
+    SHARD_STATE_UNKNOWN = 0;
+    SHARD_STATE_INITIALIZING = 1;
+    SHARD_STATE_STARTED = 2;
+    SHARD_STATE_RELOCATING = 3;
+    SHARD_STATE_CLOSED = 4;
+  }
+}
+
+message RefreshShardRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+}
+
+message RefreshShardResponse {
+  bool acknowledged = 1;
+}
+
+message FlushShardRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+}
+
+message FlushShardResponse {
+  bool acknowledged = 1;
+}
+
+// Document Operations Messages
+
+message IndexDocumentRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  string doc_id = 3;
+  google.protobuf.Struct document = 4;
+}
+
+message IndexDocumentResponse {
+  bool acknowledged = 1;
+  string doc_id = 2;
+  int64 version = 3;
+}
+
+message GetDocumentRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  string doc_id = 3;
+}
+
+message GetDocumentResponse {
+  bool found = 1;
+  string doc_id = 2;
+  google.protobuf.Struct document = 3;
+  int64 version = 4;
+}
+
+message DeleteDocumentRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  string doc_id = 3;
+}
+
+message DeleteDocumentResponse {
+  bool acknowledged = 1;
+  bool found = 2;
+}
+
+message BulkIndexRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  repeated BulkIndexItem items = 3;
+}
+
+message BulkIndexItem {
+  string doc_id = 1;
+  google.protobuf.Struct document = 2;
+}
+
+message BulkIndexResponse {
+  bool has_errors = 1;
+  repeated BulkIndexItemResponse items = 2;
+  int64 took_millis = 3;
+}
+
+message BulkIndexItemResponse {
+  bool acknowledged = 1;
+  string doc_id = 2;
+  string error = 3;
+}
+
+// Search Operations Messages
+
+message SearchRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bytes query = 3;  // Serialized query DSL
+  int32 from = 4;
+  int32 size = 5;
+  repeated string sort = 6;
+  bool track_total_hits = 7;
+  bytes filter_expression = 8;  // Serialized expression tree for native C++ evaluation
+}
+
+message SearchResponse {
+  int64 took_millis = 1;
+  bool timed_out = 2;
+  ShardSearchStats shards = 3;
+  SearchHits hits = 4;
+}
+
+message ShardSearchStats {
+  int32 total = 1;
+  int32 successful = 2;
+  int32 failed = 3;
+}
+
+message SearchHits {
+  TotalHits total = 1;
+  double max_score = 2;
+  repeated SearchHit hits = 3;
+}
+
+message TotalHits {
+  int64 value = 1;
+  string relation = 2;  // "eq" or "gte"
+}
+
+message SearchHit {
+  string id = 1;
+  double score = 2;
+  google.protobuf.Struct source = 3;
+  repeated double sort = 4;
+}
+
+message CountRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bytes query = 3;  // Serialized query DSL
+  bytes filter_expression = 4;  // Serialized expression tree for native C++ evaluation
+}
+
+message CountResponse {
+  int64 count = 1;
+}
+
+// Statistics Messages
+
+message GetShardStatsRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+}
+
+message ShardStats {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bool is_primary = 3;
+  int64 docs_count = 4;
+  int64 docs_deleted = 5;
+  int64 size_bytes = 6;
+  int64 search_queries_total = 7;
+  int64 search_queries_time_millis = 8;
+  int64 indexing_total = 9;
+  int64 indexing_time_millis = 10;
+}
+
+message GetNodeStatsRequest {
+  bool include_shards = 1;
+}
+
+message DataNodeStats {
+  string node_id = 1;
+  int32 total_shards = 2;
+  int64 total_docs = 3;
+  int64 total_size_bytes = 4;
+  double cpu_usage_percent = 5;
+  double memory_usage_percent = 6;
+  double disk_usage_percent = 7;
+  int64 uptime_seconds = 8;
+  repeated ShardStats shards = 9;
+}

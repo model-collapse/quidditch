@@ -1,0 +1,56 @@
+# Example Prometheus configuration for Quidditch monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: 'quidditch-cluster'
+    environment: 'production'
+
+# Alertmanager configuration (optional)
+# alerting:
+#   alertmanagers:
+#     - static_configs:
+#         - targets:
+#             - alertmanager:9093
+
+# Scrape configurations
+scrape_configs:
+  # Master nodes
+  - job_name: 'quidditch-master'
+    static_configs:
+      - targets:
+          - 'master-1:9000'
+          - 'master-2:9000'
+          - 'master-3:9000'
+        labels:
+          node_type: 'master'
+    metrics_path: '/metrics'
+    scheme: 'http'
+
+  # Coordination nodes
+  - job_name: 'quidditch-coordination'
+    static_configs:
+      - targets:
+          - 'coordination-1:8080'
+          - 'coordination-2:8080'
+        labels:
+          node_type: 'coordination'
+    metrics_path: '/metrics'
+    scheme: 'http'
+
+  # Data nodes
+  - job_name: 'quidditch-data'
+    static_configs:
+      - targets:
+          - 'data-1:9090'
+          - 'data-2:9090'
+          - 'data-3:9090'
+        labels:
+          node_type: 'data'
+    metrics_path: '/metrics'
+    scheme: 'http'
+
+# Example recording rules (optional)
+# rule_files:
+#   - 'quidditch_rules.yml'

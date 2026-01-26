@@ -1,0 +1,164 @@
+version: '3.8'
+
+# Quidditch Development Cluster
+# Single-node setup for local development and testing
+
+services:
+  # Master Node (Raft consensus, cluster state)
+  master:
+    image: quidditch/master:dev
+    container_name: quidditch-master-1
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.master
+    ports:
+      - "9300:9300"  # Raft port
+      - "9301:9301"  # gRPC port
+      - "9400:9400"  # Metrics port
+    volumes:
+      - master-data:/var/lib/quidditch/master
+      - ../../config:/etc/quidditch:ro
+    environment:
+      - QUIDDITCH_NODE_ID=master-1
+      - QUIDDITCH_BIND_ADDR=0.0.0.0
+      - QUIDDITCH_RAFT_PORT=9300
+      - QUIDDITCH_GRPC_PORT=9301
+      - QUIDDITCH_LOG_LEVEL=debug
+    networks:
+      - quidditch
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:9301"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Coordination Node (Query planning, REST API)
+  coordination:
+    image: quidditch/coordination:dev
+    container_name: quidditch-coordination-1
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.coordination
+    ports:
+      - "9200:9200"  # REST API (OpenSearch compatible)
+      - "9302:9302"  # gRPC port
+      - "9401:9401"  # Metrics port
+    volumes:
+      - ../../config:/etc/quidditch:ro
+      - ../../python:/opt/quidditch/python:ro
+    environment:
+      - QUIDDITCH_NODE_ID=coordination-1
+      - QUIDDITCH_BIND_ADDR=0.0.0.0
+      - QUIDDITCH_REST_PORT=9200
+      - QUIDDITCH_GRPC_PORT=9302
+      - QUIDDITCH_MASTER_ADDR=master:9301
+      - QUIDDITCH_CALCITE_ADDR=calcite:50051
+      - QUIDDITCH_LOG_LEVEL=debug
+      - QUIDDITCH_PYTHON_ENABLED=true
+    depends_on:
+      - master
+      - calcite
+    networks:
+      - quidditch
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9200/_cluster/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Data Node (Diagon - Inverted + Forward + Computation)
+  data:
+    image: quidditch/data:dev
+    container_name: quidditch-data-1
+    build:
+      context: ../..
+      dockerfile: deployments/docker/Dockerfile.data
+    ports:
+      - "9303:9303"  # gRPC port
+      - "9402:9402"  # Metrics port
+    volumes:
+      - data-storage:/var/lib/quidditch/data
+      - ../../config:/etc/quidditch:ro
+    environment:
+      - QUIDDITCH_NODE_ID=data-1
+      - QUIDDITCH_BIND_ADDR=0.0.0.0
+      - QUIDDITCH_GRPC_PORT=9303
+      - QUIDDITCH_MASTER_ADDR=master:9301
+      - QUIDDITCH_STORAGE_TIER=hot
+      - QUIDDITCH_MAX_SHARDS=100
+      - QUIDDITCH_LOG_LEVEL=debug
+      - QUIDDITCH_SIMD_ENABLED=true
+    depends_on:
+      - master
+    networks:
+      - quidditch
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:9303"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Apache Calcite (Query planner/optimizer)
+  calcite:
+    image: quidditch/calcite:dev
+    container_name: quidditch-calcite
+    build:
+      context: ../../calcite
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"  # gRPC port
+      - "9403:9403"    # Metrics port
+    environment:
+      - CALCITE_PORT=50051
+      - CALCITE_LOG_LEVEL=INFO
+    networks:
+      - quidditch
+    healthcheck:
+      test: ["CMD", "grpc_health_probe", "-addr=localhost:50051"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Prometheus (Metrics collection)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: quidditch-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=7d'
+    networks:
+      - quidditch
+
+  # Grafana (Metrics visualization)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: quidditch-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana-dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - quidditch
+
+volumes:
+  master-data:
+  data-storage:
+  prometheus-data:
+  grafana-data:
+
+networks:
+  quidditch:
+    driver: bridge

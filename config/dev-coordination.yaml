@@ -1,0 +1,37 @@
+# Quidditch Coordination Node Configuration (Development)
+
+node_id: "coordination-dev-1"
+bind_addr: "0.0.0.0"
+rest_port: 9200
+grpc_port: 9302
+
+# Master node address
+master_addr: "localhost:9301"
+
+# Apache Calcite planner
+calcite_addr: "localhost:50051"
+
+# Python integration
+python_enabled: true
+python_path: "/usr/lib/python3.11"
+python_pipelines_dir: "./python/pipelines"
+
+# Logging
+log_level: "debug"
+
+# Metrics
+metrics_port: 9401
+
+# Performance tuning
+max_concurrent: 1000
+request_timeout: "30s"
+query_cache_size: 10000
+result_cache_ttl: "5m"
+
+# OpenSearch API compatibility
+api:
+  enable_dsl: true
+  enable_ppl: true
+  enable_sql: false  # Phase 2+
+  max_result_window: 10000
+  default_page_size: 10

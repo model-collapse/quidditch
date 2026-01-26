@@ -1,0 +1,305 @@
+syntax = "proto3";
+
+package quidditch.master;
+
+option go_package = "github.com/quidditch/quidditch/pkg/common/proto";
+
+import "google/protobuf/timestamp.proto";
+
+// MasterService manages cluster state, shard allocation, and index metadata
+service MasterService {
+  // Cluster state management
+  rpc GetClusterState(GetClusterStateRequest) returns (ClusterStateResponse);
+  rpc WatchClusterState(WatchClusterStateRequest) returns (stream ClusterStateEvent);
+
+  // Index management
+  rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);
+  rpc DeleteIndex(DeleteIndexRequest) returns (DeleteIndexResponse);
+  rpc UpdateIndexSettings(UpdateIndexSettingsRequest) returns (UpdateIndexSettingsResponse);
+  rpc GetIndexMetadata(GetIndexMetadataRequest) returns (IndexMetadataResponse);
+
+  // Shard allocation
+  rpc AllocateShard(AllocateShardRequest) returns (AllocateShardResponse);
+  rpc RebalanceShards(RebalanceShardsRequest) returns (RebalanceShardsResponse);
+
+  // Node registration
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc UnregisterNode(UnregisterNodeRequest) returns (UnregisterNodeResponse);
+  rpc NodeHeartbeat(NodeHeartbeatRequest) returns (NodeHeartbeatResponse);
+}
+
+// Cluster State
+message GetClusterStateRequest {
+  bool include_routing = 1;
+  bool include_nodes = 2;
+  bool include_indices = 3;
+}
+
+message ClusterStateResponse {
+  int64 version = 1;
+  string cluster_name = 2;
+  string cluster_uuid = 3;
+  ClusterStatus status = 4;
+  repeated IndexMetadata indices = 5;
+  RoutingTable routing_table = 6;
+  repeated NodeInfo nodes = 7;
+  MasterNode master_node = 8;
+}
+
+enum ClusterStatus {
+  CLUSTER_STATUS_UNKNOWN = 0;
+  CLUSTER_STATUS_GREEN = 1;    // All primary and replica shards allocated
+  CLUSTER_STATUS_YELLOW = 2;   // All primary shards allocated, some replicas missing
+  CLUSTER_STATUS_RED = 3;      // Some primary shards not allocated
+}
+
+message WatchClusterStateRequest {
+  int64 from_version = 1;
+}
+
+message ClusterStateEvent {
+  int64 version = 1;
+  EventType type = 2;
+  bytes payload = 3;
+
+  enum EventType {
+    EVENT_TYPE_UNKNOWN = 0;
+    EVENT_TYPE_INDEX_CREATED = 1;
+    EVENT_TYPE_INDEX_DELETED = 2;
+    EVENT_TYPE_SHARD_ALLOCATED = 3;
+    EVENT_TYPE_SHARD_RELOCATED = 4;
+    EVENT_TYPE_NODE_JOINED = 5;
+    EVENT_TYPE_NODE_LEFT = 6;
+  }
+}
+
+// Index Management
+message CreateIndexRequest {
+  string index_name = 1;
+  IndexSettings settings = 2;
+  map<string, FieldMapping> mappings = 3;
+  map<string, string> aliases = 4;
+}
+
+message CreateIndexResponse {
+  bool acknowledged = 1;
+  string index_name = 2;
+  int64 version = 3;
+}
+
+message DeleteIndexRequest {
+  string index_name = 1;
+}
+
+message DeleteIndexResponse {
+  bool acknowledged = 1;
+}
+
+message UpdateIndexSettingsRequest {
+  string index_name = 1;
+  IndexSettings settings = 2;
+}
+
+message UpdateIndexSettingsResponse {
+  bool acknowledged = 1;
+}
+
+message GetIndexMetadataRequest {
+  string index_name = 1;
+}
+
+message IndexMetadataResponse {
+  IndexMetadata metadata = 1;
+}
+
+message IndexMetadata {
+  string index_name = 1;
+  string index_uuid = 2;
+  int64 version = 3;
+  IndexSettings settings = 4;
+  map<string, FieldMapping> mappings = 5;
+  map<string, string> aliases = 6;
+  IndexState state = 7;
+  google.protobuf.Timestamp created_at = 8;
+
+  enum IndexState {
+    INDEX_STATE_UNKNOWN = 0;
+    INDEX_STATE_CREATING = 1;
+    INDEX_STATE_OPEN = 2;
+    INDEX_STATE_CLOSED = 3;
+    INDEX_STATE_DELETING = 4;
+  }
+}
+
+message IndexSettings {
+  int32 number_of_shards = 1;
+  int32 number_of_replicas = 2;
+  string refresh_interval = 3;
+  CompressionSettings compression = 4;
+  TieringSettings tiering = 5;
+}
+
+message CompressionSettings {
+  string codec = 1;  // lz4, zstd, deflate
+  int32 level = 2;
+}
+
+message TieringSettings {
+  string default_tier = 1;  // hot, warm, cold, frozen
+  map<string, string> tier_rules = 2;
+}
+
+message FieldMapping {
+  string type = 1;  // text, keyword, long, double, date, boolean, etc.
+  bool index = 2;
+  bool store = 3;
+  string analyzer = 4;
+  map<string, FieldMapping> properties = 5;
+}
+
+// Shard Allocation
+message AllocateShardRequest {
+  string index_name = 1;
+  int32 shard_id = 2;
+  bool is_primary = 3;
+  string preferred_node_id = 4;
+}
+
+message AllocateShardResponse {
+  bool acknowledged = 1;
+  string node_id = 2;
+  ShardAllocation allocation = 3;
+}
+
+message RebalanceShardsRequest {
+  repeated string index_names = 1;
+  bool dry_run = 2;
+}
+
+message RebalanceShardsResponse {
+  repeated ShardRelocation relocations = 1;
+}
+
+message ShardRelocation {
+  string index_name = 1;
+  int32 shard_id = 2;
+  string from_node = 3;
+  string to_node = 4;
+}
+
+// Routing Table
+message RoutingTable {
+  int64 version = 1;
+  map<string, IndexRoutingTable> indices = 2;
+}
+
+message IndexRoutingTable {
+  string index_name = 1;
+  map<int32, ShardRouting> shards = 2;
+}
+
+message ShardRouting {
+  int32 shard_id = 1;
+  bool is_primary = 2;
+  ShardAllocation allocation = 3;
+}
+
+message ShardAllocation {
+  string node_id = 1;
+  ShardState state = 2;
+  google.protobuf.Timestamp allocated_at = 3;
+
+  enum ShardState {
+    SHARD_STATE_UNKNOWN = 0;
+    SHARD_STATE_INITIALIZING = 1;
+    SHARD_STATE_STARTED = 2;
+    SHARD_STATE_RELOCATING = 3;
+    SHARD_STATE_UNASSIGNED = 4;
+  }
+}
+
+// Node Management
+message RegisterNodeRequest {
+  string node_id = 1;
+  NodeType node_type = 2;
+  string bind_addr = 3;
+  int32 grpc_port = 4;
+  NodeAttributes attributes = 5;
+}
+
+message RegisterNodeResponse {
+  bool acknowledged = 1;
+  int64 cluster_version = 2;
+}
+
+message UnregisterNodeRequest {
+  string node_id = 1;
+}
+
+message UnregisterNodeResponse {
+  bool acknowledged = 1;
+}
+
+message NodeHeartbeatRequest {
+  string node_id = 1;
+  NodeStats stats = 2;
+}
+
+message NodeHeartbeatResponse {
+  bool acknowledged = 1;
+  int64 cluster_version = 2;
+}
+
+enum NodeType {
+  NODE_TYPE_UNKNOWN = 0;
+  NODE_TYPE_MASTER = 1;
+  NODE_TYPE_COORDINATION = 2;
+  NODE_TYPE_DATA = 3;
+  NODE_TYPE_INGEST = 4;
+}
+
+message NodeInfo {
+  string node_id = 1;
+  string node_name = 2;
+  NodeType node_type = 3;
+  string bind_addr = 4;
+  int32 grpc_port = 5;
+  NodeAttributes attributes = 6;
+  NodeStatus status = 7;
+  google.protobuf.Timestamp joined_at = 8;
+  google.protobuf.Timestamp last_seen = 9;
+}
+
+message NodeAttributes {
+  string storage_tier = 1;  // hot, warm, cold, frozen
+  int32 max_shards = 2;
+  bool simd_enabled = 3;
+  string version = 4;
+  map<string, string> labels = 5;
+}
+
+enum NodeStatus {
+  NODE_STATUS_UNKNOWN = 0;
+  NODE_STATUS_HEALTHY = 1;
+  NODE_STATUS_DEGRADED = 2;
+  NODE_STATUS_UNHEALTHY = 3;
+  NODE_STATUS_OFFLINE = 4;
+}
+
+message NodeStats {
+  int64 total_shards = 1;
+  int64 docs_count = 2;
+  int64 store_size_bytes = 3;
+  double cpu_usage_percent = 4;
+  double memory_usage_percent = 5;
+  double disk_usage_percent = 6;
+  int64 search_queries_per_sec = 7;
+  int64 indexing_rate_per_sec = 8;
+}
+
+message MasterNode {
+  string node_id = 1;
+  string node_name = 2;
+  google.protobuf.Timestamp elected_at = 3;
+  int64 term = 4;
+}

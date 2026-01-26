@@ -1,0 +1,79 @@
+# Multi-stage build for Quidditch Master Node
+# Stage 1: Builder
+FROM golang:1.22-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache git ca-certificates tzdata
+
+# Set working directory
+WORKDIR /build
+
+# Copy go mod files
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy source code
+COPY cmd/ ./cmd/
+COPY pkg/ ./pkg/
+
+# Build arguments for version information
+ARG VERSION=dev
+ARG BUILD_DATE
+ARG VCS_REF
+
+# Build the binary
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
+    go build -a -installsuffix cgo \
+    -ldflags="-w -s -X main.version=${VERSION} -X main.commit=${VCS_REF} -X main.date=${BUILD_DATE}" \
+    -o quidditch-master \
+    ./cmd/master
+
+# Stage 2: Runtime
+FROM alpine:3.19
+
+# Add metadata labels
+LABEL org.opencontainers.image.title="Quidditch Master Node"
+LABEL org.opencontainers.image.description="Distributed search engine master node with Raft consensus"
+LABEL org.opencontainers.image.version="${VERSION}"
+LABEL org.opencontainers.image.created="${BUILD_DATE}"
+LABEL org.opencontainers.image.revision="${VCS_REF}"
+LABEL org.opencontainers.image.source="https://github.com/quidditch/quidditch"
+LABEL org.opencontainers.image.vendor="Quidditch"
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Create non-root user
+RUN addgroup -g 1000 quidditch && \
+    adduser -D -u 1000 -G quidditch quidditch
+
+# Create data directory
+RUN mkdir -p /data/raft && \
+    chown -R quidditch:quidditch /data
+
+# Copy binary from builder
+COPY --from=builder /build/quidditch-master /usr/local/bin/quidditch-master
+
+# Copy default configuration
+COPY config/docker-master.yaml /etc/quidditch/master.yaml
+RUN chown quidditch:quidditch /etc/quidditch/master.yaml
+
+# Switch to non-root user
+USER quidditch
+
+# Set working directory
+WORKDIR /data
+
+# Expose ports
+# 9300: Raft consensus
+# 9301: gRPC API
+# 9400: Metrics
+EXPOSE 9300 9301 9400
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+    CMD ["/usr/local/bin/quidditch-master", "health"]
+
+# Default command
+ENTRYPOINT ["/usr/local/bin/quidditch-master"]
+CMD ["--config", "/etc/quidditch/master.yaml"]

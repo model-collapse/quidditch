@@ -1,0 +1,46 @@
+# Quidditch Master Node Configuration (Docker)
+
+# Node identification
+node_id: ${NODE_ID:-master-1}
+
+# Network binding
+bind_addr: "0.0.0.0"
+
+# Raft consensus configuration
+raft_port: 9300
+peers: ${RAFT_PEERS:-}
+
+# gRPC API configuration
+grpc_port: 9301
+
+# Data storage
+data_dir: "/data/raft"
+
+# Logging
+log_level: ${LOG_LEVEL:-info}
+log_format: "json"
+
+# Metrics
+metrics_port: 9400
+metrics_enabled: true
+
+# Cluster settings
+cluster:
+  name: ${CLUSTER_NAME:-quidditch-cluster}
+  uuid: ${CLUSTER_UUID:-}
+
+# Bootstrap settings
+bootstrap: ${BOOTSTRAP:-false}
+
+# Performance tuning
+raft:
+  heartbeat_timeout: "1s"
+  election_timeout: "3s"
+  commit_timeout: "50ms"
+  max_append_entries: 64
+  snapshot_interval: "120s"
+  snapshot_threshold: 8192
+
+# Resource limits
+max_concurrent_requests: 100
+request_timeout: "30s"

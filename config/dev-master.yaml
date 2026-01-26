@@ -1,0 +1,33 @@
+# Quidditch Master Node Configuration (Development)
+
+node_id: "master-dev-1"
+bind_addr: "0.0.0.0"
+raft_port: 9300
+grpc_port: 9301
+data_dir: "/tmp/quidditch/master"
+
+# Cluster peers (for multi-master setup)
+peers:
+  - "localhost:9300"
+  # - "localhost:9310"  # Additional masters
+  # - "localhost:9320"
+
+# Logging
+log_level: "debug"
+
+# Metrics
+metrics_port: 9400
+
+# Raft configuration
+raft:
+  heartbeat_timeout: "1s"
+  election_timeout: "3s"
+  snapshot_interval: "5m"
+  snapshot_threshold: 8192
+  trailing_logs: 10240
+
+# Cluster state
+cluster:
+  name: "quidditch-dev"
+  initial_master_nodes:
+    - "master-dev-1"

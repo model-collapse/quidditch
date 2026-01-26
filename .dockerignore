@@ -1,0 +1,60 @@
+# Git
+.git
+.gitignore
+.github
+
+# Documentation
+*.md
+!README.md
+design/
+docs/
+
+# Test files
+*_test.go
+test/
+coverage.out
+coverage.txt
+*.coverprofile
+
+# Build artifacts
+bin/
+dist/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.log
+
+# Development
+.env
+.env.*
+!.env.example
+
+# CI/CD (not needed in image)
+.golangci.yml
+Makefile
+
+# Deployment (not needed in image)
+deployments/kubernetes/
+deployments/helm/
+
+# Data directories
+data/
+/data
+*.db

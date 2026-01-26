@@ -1,0 +1,54 @@
+# Quidditch Coordination Node Configuration (Docker)
+
+# Node identification
+node_id: ${NODE_ID:-coord-1}
+
+# Network binding
+bind_addr: "0.0.0.0"
+
+# REST API configuration
+rest_port: 9200
+
+# Master node connection
+master_addr: ${MASTER_ADDR:-master-1:9301}
+master_timeout: "10s"
+
+# Logging
+log_level: ${LOG_LEVEL:-info}
+log_format: "json"
+
+# Cluster settings
+cluster:
+  name: ${CLUSTER_NAME:-quidditch-cluster}
+
+# Query settings
+query:
+  max_size: 10000
+  default_size: 10
+  timeout: "30s"
+  max_concurrent: 100
+
+# Connection pooling
+connection_pool:
+  max_idle: 10
+  max_open: 100
+  idle_timeout: "5m"
+
+# Request limits
+max_request_size: "10MB"
+read_timeout: "30s"
+write_timeout: "30s"
+idle_timeout: "120s"
+
+# CORS settings
+cors:
+  enabled: true
+  allowed_origins: ["*"]
+  allowed_methods: ["GET", "POST", "PUT", "DELETE", "HEAD", "OPTIONS"]
+  allowed_headers: ["*"]
+
+# Performance
+cache:
+  enabled: true
+  size: "100MB"
+  ttl: "5m"
