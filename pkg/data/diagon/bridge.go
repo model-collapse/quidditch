@@ -385,13 +385,26 @@ type Hit struct {
 
 // AggregationResult represents an aggregation result
 type AggregationResult struct {
-	Type    string                       `json:"type"`    // "terms" or "stats"
+	Type    string                       `json:"type"`    // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats"
 	Buckets []map[string]interface{}     `json:"buckets,omitempty"`
 	Count   int64                        `json:"count,omitempty"`
 	Min     float64                      `json:"min,omitempty"`
 	Max     float64                      `json:"max,omitempty"`
 	Avg     float64                      `json:"avg,omitempty"`
 	Sum     float64                      `json:"sum,omitempty"`
+
+	// Cardinality aggregation
+	Value int64 `json:"value,omitempty"`
+
+	// Percentiles aggregation (percentile -> value map)
+	Values map[string]float64 `json:"values,omitempty"`
+
+	// Extended stats aggregation
+	SumOfSquares              float64 `json:"sum_of_squares,omitempty"`
+	Variance                  float64 `json:"variance,omitempty"`
+	StdDeviation              float64 `json:"std_deviation,omitempty"`
+	StdDeviationBoundsUpper   float64 `json:"std_deviation_bounds_upper,omitempty"`
+	StdDeviationBoundsLower   float64 `json:"std_deviation_bounds_lower,omitempty"`
 }
 
 // ShardManager manages shard distribution

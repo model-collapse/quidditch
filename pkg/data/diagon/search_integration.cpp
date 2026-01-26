@@ -766,6 +766,89 @@ SearchResult Shard::searchWithoutFilter(
 
                     result.aggregations[aggName] = aggResult;
                 }
+                else if (aggDef.contains("histogram")) {
+                    // Histogram aggregation
+                    auto histAgg = aggDef["histogram"];
+                    std::string field = histAgg["field"].get<std::string>();
+                    double interval = histAgg["interval"].get<double>();
+
+                    aggResult.type = "histogram";
+
+                    auto buckets = documentStore_->aggregateHistogram(field, matchingDocIds, interval);
+                    for (const auto& bucket : buckets) {
+                        aggResult.histogramBuckets.push_back(bucket);
+                    }
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("date_histogram")) {
+                    // Date histogram aggregation
+                    auto dateHistAgg = aggDef["date_histogram"];
+                    std::string field = dateHistAgg["field"].get<std::string>();
+                    std::string interval = dateHistAgg["interval"].get<std::string>();
+
+                    aggResult.type = "date_histogram";
+
+                    auto buckets = documentStore_->aggregateDateHistogram(field, matchingDocIds, interval);
+                    for (const auto& bucket : buckets) {
+                        aggResult.dateHistogramBuckets.push_back(bucket);
+                    }
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("percentiles")) {
+                    // Percentiles aggregation
+                    auto percAgg = aggDef["percentiles"];
+                    std::string field = percAgg["field"].get<std::string>();
+
+                    std::vector<double> percents = {50.0, 95.0, 99.0}; // defaults
+                    if (percAgg.contains("percents")) {
+                        percents.clear();
+                        for (const auto& p : percAgg["percents"]) {
+                            percents.push_back(p.get<double>());
+                        }
+                    }
+
+                    aggResult.type = "percentiles";
+
+                    auto percentiles = documentStore_->aggregatePercentiles(field, matchingDocIds, percents);
+                    aggResult.percentiles = percentiles.values;
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("cardinality")) {
+                    // Cardinality aggregation
+                    auto cardAgg = aggDef["cardinality"];
+                    std::string field = cardAgg["field"].get<std::string>();
+
+                    aggResult.type = "cardinality";
+
+                    auto cardinality = documentStore_->aggregateCardinality(field, matchingDocIds);
+                    aggResult.cardinality = cardinality.value;
+
+                    result.aggregations[aggName] = aggResult;
+                }
+                else if (aggDef.contains("extended_stats")) {
+                    // Extended stats aggregation
+                    auto extStatsAgg = aggDef["extended_stats"];
+                    std::string field = extStatsAgg["field"].get<std::string>();
+
+                    aggResult.type = "extended_stats";
+
+                    auto extStats = documentStore_->aggregateExtendedStats(field, matchingDocIds);
+                    aggResult.count = extStats.count;
+                    aggResult.min = extStats.min;
+                    aggResult.max = extStats.max;
+                    aggResult.avg = extStats.avg;
+                    aggResult.sum = extStats.sum;
+                    aggResult.sumOfSquares = extStats.sumOfSquares;
+                    aggResult.variance = extStats.variance;
+                    aggResult.stdDeviation = extStats.stdDeviation;
+                    aggResult.stdDeviationBounds_upper = extStats.stdDeviationBounds_upper;
+                    aggResult.stdDeviationBounds_lower = extStats.stdDeviationBounds_lower;
+
+                    result.aggregations[aggName] = aggResult;
+                }
             }
         }
 
@@ -882,6 +965,75 @@ char* diagon_search_with_filter(
             hitsArray.push_back(hit);
         }
         resultJson["hits"] = hitsArray;
+
+        // Add aggregations if present
+        if (!result.aggregations.empty()) {
+            nlohmann::json aggsJson = nlohmann::json::object();
+
+            for (const auto& aggPair : result.aggregations) {
+                nlohmann::json aggJson;
+                aggJson["type"] = aggPair.second.type;
+
+                if (aggPair.second.type == "terms") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.buckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.first;
+                        bucketJson["doc_count"] = bucket.second;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "stats") {
+                    aggJson["count"] = aggPair.second.count;
+                    aggJson["min"] = aggPair.second.min;
+                    aggJson["max"] = aggPair.second.max;
+                    aggJson["avg"] = aggPair.second.avg;
+                    aggJson["sum"] = aggPair.second.sum;
+                } else if (aggPair.second.type == "histogram") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.histogramBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "date_histogram") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.dateHistogramBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        bucketJson["key_as_string"] = bucket.keyAsString;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "percentiles") {
+                    nlohmann::json valuesJson = nlohmann::json::object();
+                    for (const auto& percentile : aggPair.second.percentiles) {
+                        valuesJson[std::to_string(percentile.first)] = percentile.second;
+                    }
+                    aggJson["values"] = valuesJson;
+                } else if (aggPair.second.type == "cardinality") {
+                    aggJson["value"] = aggPair.second.cardinality;
+                } else if (aggPair.second.type == "extended_stats") {
+                    aggJson["count"] = aggPair.second.count;
+                    aggJson["min"] = aggPair.second.min;
+                    aggJson["max"] = aggPair.second.max;
+                    aggJson["avg"] = aggPair.second.avg;
+                    aggJson["sum"] = aggPair.second.sum;
+                    aggJson["sum_of_squares"] = aggPair.second.sumOfSquares;
+                    aggJson["variance"] = aggPair.second.variance;
+                    aggJson["std_deviation"] = aggPair.second.stdDeviation;
+                    aggJson["std_deviation_bounds_upper"] = aggPair.second.stdDeviationBounds_upper;
+                    aggJson["std_deviation_bounds_lower"] = aggPair.second.stdDeviationBounds_lower;
+                }
+
+                aggsJson[aggPair.second.name] = aggJson;
+            }
+
+            resultJson["aggregations"] = aggsJson;
+        }
 
         // Convert to C string (caller must free)
         std::string jsonStr = resultJson.dump();
@@ -1220,6 +1372,44 @@ char* diagon_distributed_search(
                     aggJson["max"] = aggPair.second.max;
                     aggJson["avg"] = aggPair.second.avg;
                     aggJson["sum"] = aggPair.second.sum;
+                } else if (aggPair.second.type == "histogram") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.histogramBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "date_histogram") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.dateHistogramBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        bucketJson["key_as_string"] = bucket.keyAsString;
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
+                } else if (aggPair.second.type == "percentiles") {
+                    nlohmann::json valuesJson = nlohmann::json::object();
+                    for (const auto& percentile : aggPair.second.percentiles) {
+                        valuesJson[std::to_string(percentile.first)] = percentile.second;
+                    }
+                    aggJson["values"] = valuesJson;
+                } else if (aggPair.second.type == "cardinality") {
+                    aggJson["value"] = aggPair.second.cardinality;
+                } else if (aggPair.second.type == "extended_stats") {
+                    aggJson["count"] = aggPair.second.count;
+                    aggJson["min"] = aggPair.second.min;
+                    aggJson["max"] = aggPair.second.max;
+                    aggJson["avg"] = aggPair.second.avg;
+                    aggJson["sum"] = aggPair.second.sum;
+                    aggJson["sum_of_squares"] = aggPair.second.sumOfSquares;
+                    aggJson["variance"] = aggPair.second.variance;
+                    aggJson["std_deviation"] = aggPair.second.stdDeviation;
+                    aggJson["std_deviation_bounds_upper"] = aggPair.second.stdDeviationBounds_upper;
+                    aggJson["std_deviation_bounds_lower"] = aggPair.second.stdDeviationBounds_lower;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;

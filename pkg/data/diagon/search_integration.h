@@ -9,9 +9,11 @@
 
 #include "document.h"
 #include "expression_evaluator.h"
+#include "document_store.h"
 #include <memory>
 #include <vector>
 #include <cstdint>
+#include <unordered_map>
 
 namespace diagon {
 
@@ -27,7 +29,7 @@ struct SearchOptions {
 // Aggregation results
 struct AggregationResult {
     std::string name;
-    std::string type;  // "terms" or "stats"
+    std::string type;  // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats"
 
     // Terms aggregation buckets
     std::vector<std::pair<std::string, int64_t>> buckets;
@@ -38,6 +40,25 @@ struct AggregationResult {
     double max = 0.0;
     double avg = 0.0;
     double sum = 0.0;
+
+    // Histogram aggregation buckets
+    std::vector<DocumentStore::HistogramBucket> histogramBuckets;
+
+    // Date histogram aggregation buckets
+    std::vector<DocumentStore::DateHistogramBucket> dateHistogramBuckets;
+
+    // Percentiles aggregation values (percentile -> value)
+    std::unordered_map<double, double> percentiles;
+
+    // Cardinality aggregation value
+    int64_t cardinality = 0;
+
+    // Extended stats aggregation (additional fields beyond basic stats)
+    double sumOfSquares = 0.0;
+    double variance = 0.0;
+    double stdDeviation = 0.0;
+    double stdDeviationBounds_upper = 0.0;
+    double stdDeviationBounds_lower = 0.0;
 };
 
 // SearchResult represents the result of a search query

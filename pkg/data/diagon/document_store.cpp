@@ -9,6 +9,8 @@
 #include <mutex>
 #include <cmath>
 #include <unordered_set>
+#include <ctime>
+#include <map>
 
 namespace diagon {
 
@@ -782,6 +784,392 @@ DocumentStore::StatsAggregation DocumentStore::aggregateStats(
     } else {
         stats.min = 0.0;
         stats.max = 0.0;
+    }
+
+    return stats;
+}
+
+// Histogram aggregation (numeric buckets)
+std::vector<DocumentStore::HistogramBucket> DocumentStore::aggregateHistogram(
+    const std::string& field,
+    const std::vector<std::string>& docIds,
+    double interval) const {
+
+    if (interval <= 0) {
+        return {};
+    }
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    // Collect all values and determine range
+    std::vector<double> values;
+    values.reserve(docIds.size());
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    values.push_back(value.get<double>());
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    if (values.empty()) {
+        return {};
+    }
+
+    // Find min and max to determine bucket range
+    double minVal = *std::min_element(values.begin(), values.end());
+    double maxVal = *std::max_element(values.begin(), values.end());
+
+    // Create buckets
+    std::map<double, int64_t> bucketCounts;  // key -> count
+
+    for (double val : values) {
+        // Calculate bucket key (floor to nearest interval)
+        double bucketKey = std::floor(val / interval) * interval;
+        bucketCounts[bucketKey]++;
+    }
+
+    // Convert to vector
+    std::vector<HistogramBucket> buckets;
+    for (const auto& [key, count] : bucketCounts) {
+        buckets.push_back({key, count});
+    }
+
+    return buckets;
+}
+
+// Date histogram aggregation (time-based buckets)
+std::vector<DocumentStore::DateHistogramBucket> DocumentStore::aggregateDateHistogram(
+    const std::string& field,
+    const std::vector<std::string>& docIds,
+    const std::string& interval) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    // Parse interval (e.g., "1h", "1d", "1M")
+    int64_t intervalMs = 0;
+    if (interval.find("ms") != std::string::npos) {
+        intervalMs = std::stoll(interval.substr(0, interval.find("ms")));
+    } else if (interval.find('s') != std::string::npos) {
+        intervalMs = std::stoll(interval.substr(0, interval.find('s'))) * 1000;
+    } else if (interval.find('m') != std::string::npos) {
+        intervalMs = std::stoll(interval.substr(0, interval.find('m'))) * 60 * 1000;
+    } else if (interval.find('h') != std::string::npos) {
+        intervalMs = std::stoll(interval.substr(0, interval.find('h'))) * 60 * 60 * 1000;
+    } else if (interval.find('d') != std::string::npos) {
+        intervalMs = std::stoll(interval.substr(0, interval.find('d'))) * 24 * 60 * 60 * 1000;
+    } else {
+        // Default to 1 hour
+        intervalMs = 60 * 60 * 1000;
+    }
+
+    // Collect timestamps
+    std::map<int64_t, int64_t> bucketCounts;  // bucket timestamp -> count
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number_integer()) {
+                    int64_t timestamp = value.get<int64_t>();
+                    // Floor to interval
+                    int64_t bucketKey = (timestamp / intervalMs) * intervalMs;
+                    bucketCounts[bucketKey]++;
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    // Convert to vector with formatted dates
+    std::vector<DateHistogramBucket> buckets;
+    for (const auto& [key, count] : bucketCounts) {
+        DateHistogramBucket bucket;
+        bucket.key = key;
+        bucket.docCount = count;
+
+        // Format timestamp as ISO 8601 (simplified)
+        time_t t = key / 1000;
+        char buf[32];
+        strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", gmtime(&t));
+        bucket.keyAsString = buf;
+
+        buckets.push_back(bucket);
+    }
+
+    return buckets;
+}
+
+// Percentiles aggregation
+DocumentStore::PercentilesAggregation DocumentStore::aggregatePercentiles(
+    const std::string& field,
+    const std::vector<std::string>& docIds,
+    const std::vector<double>& percentiles) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    PercentilesAggregation result;
+
+    // Collect all values
+    std::vector<double> values;
+    values.reserve(docIds.size());
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    values.push_back(value.get<double>());
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    if (values.empty()) {
+        return result;
+    }
+
+    // Sort values for percentile calculation
+    std::sort(values.begin(), values.end());
+
+    // Calculate requested percentiles
+    for (double p : percentiles) {
+        if (p < 0.0 || p > 100.0) {
+            continue;
+        }
+
+        // Calculate index using linear interpolation
+        double index = (p / 100.0) * (values.size() - 1);
+        size_t lowerIndex = static_cast<size_t>(std::floor(index));
+        size_t upperIndex = static_cast<size_t>(std::ceil(index));
+
+        double percentileValue;
+        if (lowerIndex == upperIndex) {
+            percentileValue = values[lowerIndex];
+        } else {
+            // Linear interpolation between two values
+            double fraction = index - lowerIndex;
+            percentileValue = values[lowerIndex] * (1.0 - fraction) + values[upperIndex] * fraction;
+        }
+
+        result.values[p] = percentileValue;
+    }
+
+    return result;
+}
+
+// Cardinality aggregation (approximate unique count)
+DocumentStore::CardinalityAggregation DocumentStore::aggregateCardinality(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    CardinalityAggregation result;
+
+    // Use set for exact unique count (for smaller datasets)
+    // For larger datasets, would use HyperLogLog
+    std::unordered_set<std::string> uniqueValues;
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+
+                // Convert value to string for hashing
+                std::string valueStr;
+                if (value.is_string()) {
+                    valueStr = value.get<std::string>();
+                } else if (value.is_number()) {
+                    valueStr = value.dump();
+                } else if (value.is_boolean()) {
+                    valueStr = value.get<bool>() ? "true" : "false";
+                } else {
+                    valueStr = value.dump();
+                }
+
+                uniqueValues.insert(valueStr);
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    result.value = uniqueValues.size();
+    return result;
+}
+
+// Extended stats aggregation
+DocumentStore::ExtendedStatsAggregation DocumentStore::aggregateExtendedStats(
+    const std::string& field,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    ExtendedStatsAggregation stats;
+    stats.count = 0;
+    stats.min = std::numeric_limits<double>::max();
+    stats.max = std::numeric_limits<double>::lowest();
+    stats.sum = 0.0;
+    stats.sumOfSquares = 0.0;
+
+    std::vector<double> values;
+    values.reserve(docIds.size());
+
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    double numValue = value.get<double>();
+                    values.push_back(numValue);
+
+                    stats.count++;
+                    stats.sum += numValue;
+                    stats.sumOfSquares += numValue * numValue;
+                    stats.min = std::min(stats.min, numValue);
+                    stats.max = std::max(stats.max, numValue);
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    if (stats.count > 0) {
+        stats.avg = stats.sum / stats.count;
+
+        // Calculate variance and standard deviation
+        double meanSquare = stats.sumOfSquares / stats.count;
+        double squareMean = stats.avg * stats.avg;
+        stats.variance = meanSquare - squareMean;
+        stats.stdDeviation = std::sqrt(stats.variance);
+
+        // Standard deviation bounds (±2 sigma)
+        stats.stdDeviationBounds_upper = stats.avg + 2.0 * stats.stdDeviation;
+        stats.stdDeviationBounds_lower = stats.avg - 2.0 * stats.stdDeviation;
+    } else {
+        stats.min = 0.0;
+        stats.max = 0.0;
+        stats.avg = 0.0;
+        stats.variance = 0.0;
+        stats.stdDeviation = 0.0;
+        stats.stdDeviationBounds_upper = 0.0;
+        stats.stdDeviationBounds_lower = 0.0;
     }
 
     return stats;

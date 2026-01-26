@@ -135,6 +135,38 @@ public:
         double sum;
     };
 
+    struct HistogramBucket {
+        double key;           // Lower bound of bucket
+        int64_t docCount;     // Number of documents in bucket
+    };
+
+    struct DateHistogramBucket {
+        int64_t key;          // Timestamp (milliseconds since epoch)
+        int64_t docCount;     // Number of documents in bucket
+        std::string keyAsString;  // Human-readable date
+    };
+
+    struct PercentilesAggregation {
+        std::unordered_map<double, double> values;  // percentile -> value
+    };
+
+    struct CardinalityAggregation {
+        int64_t value;        // Approximate unique count
+    };
+
+    struct ExtendedStatsAggregation {
+        int64_t count;
+        double min;
+        double max;
+        double avg;
+        double sum;
+        double sumOfSquares;
+        double variance;
+        double stdDeviation;
+        double stdDeviationBounds_upper;
+        double stdDeviationBounds_lower;
+    };
+
     // Terms aggregation (faceting)
     std::vector<TermBucket> aggregateTerms(
         const std::string& field,
@@ -143,6 +175,34 @@ public:
 
     // Stats aggregation on numeric field
     StatsAggregation aggregateStats(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Histogram aggregation (numeric buckets)
+    std::vector<HistogramBucket> aggregateHistogram(
+        const std::string& field,
+        const std::vector<std::string>& docIds,
+        double interval) const;
+
+    // Date histogram aggregation (time-based buckets)
+    std::vector<DateHistogramBucket> aggregateDateHistogram(
+        const std::string& field,
+        const std::vector<std::string>& docIds,
+        const std::string& interval) const;
+
+    // Percentiles aggregation (50th, 95th, 99th, etc.)
+    PercentilesAggregation aggregatePercentiles(
+        const std::string& field,
+        const std::vector<std::string>& docIds,
+        const std::vector<double>& percentiles = {50.0, 95.0, 99.0}) const;
+
+    // Cardinality aggregation (approximate unique count)
+    CardinalityAggregation aggregateCardinality(
+        const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Extended stats aggregation (includes variance, std deviation)
+    ExtendedStatsAggregation aggregateExtendedStats(
         const std::string& field,
         const std::vector<std::string>& docIds) const;
 
