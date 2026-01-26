@@ -82,7 +82,7 @@ jobs:
 
       - name: Upload test logs
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: integration-test-logs
           path: /tmp/quidditch-test-*
@@ -126,7 +126,7 @@ jobs:
           go build -ldflags="-s -w" -o dist/quidditch-data-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/data
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
