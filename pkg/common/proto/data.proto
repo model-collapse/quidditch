@@ -206,9 +206,9 @@ message SearchHit {
 // Aggregation Messages
 
 message AggregationResult {
-  string type = 1;  // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats, avg, min, max, sum, value_count
+  string type = 1;  // terms, stats, histogram, date_histogram, percentiles, cardinality, extended_stats, avg, min, max, sum, value_count, range
 
-  // Terms aggregation
+  // Terms aggregation, Range aggregation
   repeated AggregationBucket buckets = 2;
 
   // Stats/Extended Stats aggregation
@@ -231,10 +231,14 @@ message AggregationResult {
 }
 
 message AggregationBucket {
-  string key = 1;            // For terms, date histogram key_as_string
+  string key = 1;            // For terms, date histogram key_as_string, range
   double numeric_key = 2;    // For histogram, date histogram timestamp
   int64 doc_count = 3;
   map<string, AggregationResult> sub_aggregations = 4;  // For nested aggregations
+
+  // Range aggregation fields
+  optional double from = 5;  // Lower bound for range (omitted if unbounded)
+  optional double to = 6;    // Upper bound for range (omitted if unbounded)
 }
 
 message CountRequest {

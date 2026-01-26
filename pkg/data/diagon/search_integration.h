@@ -29,7 +29,7 @@ struct SearchOptions {
 // Aggregation results
 struct AggregationResult {
     std::string name;
-    std::string type;  // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats", "avg", "min", "max", "sum", "value_count"
+    std::string type;  // "terms", "stats", "histogram", "date_histogram", "percentiles", "cardinality", "extended_stats", "avg", "min", "max", "sum", "value_count", "range"
 
     // Terms aggregation buckets
     std::vector<std::pair<std::string, int64_t>> buckets;
@@ -46,6 +46,9 @@ struct AggregationResult {
 
     // Date histogram aggregation buckets
     std::vector<DocumentStore::DateHistogramBucket> dateHistogramBuckets;
+
+    // Range aggregation buckets
+    std::vector<DocumentStore::RangeBucket> rangeBuckets;
 
     // Percentiles aggregation values (percentile -> value)
     std::unordered_map<double, double> percentiles;

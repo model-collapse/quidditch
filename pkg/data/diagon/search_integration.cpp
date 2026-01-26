@@ -899,6 +899,63 @@ SearchResult Shard::searchWithoutFilter(
 
                     result.aggregations[aggName] = aggResult;
                 }
+                else if (aggDef.contains("range")) {
+                    // Range aggregation (count documents in numeric ranges)
+                    auto rangeAgg = aggDef["range"];
+                    std::string field = rangeAgg["field"].get<std::string>();
+
+                    // Parse ranges from query
+                    std::vector<DocumentStore::RangeBucket> ranges;
+                    if (rangeAgg.contains("ranges") && rangeAgg["ranges"].is_array()) {
+                        for (const auto& rangeSpec : rangeAgg["ranges"]) {
+                            DocumentStore::RangeBucket bucket;
+
+                            // Parse key (optional, auto-generate if not provided)
+                            if (rangeSpec.contains("key")) {
+                                bucket.key = rangeSpec["key"].get<std::string>();
+                            }
+
+                            // Parse from (optional lower bound)
+                            if (rangeSpec.contains("from")) {
+                                bucket.from = rangeSpec["from"].get<double>();
+                                bucket.fromSet = true;
+
+                                // Auto-generate key if not provided
+                                if (bucket.key.empty()) {
+                                    bucket.key = std::to_string(bucket.from) + "-";
+                                }
+                            } else {
+                                bucket.fromSet = false;
+                                if (bucket.key.empty()) {
+                                    bucket.key = "*-";
+                                }
+                            }
+
+                            // Parse to (optional upper bound)
+                            if (rangeSpec.contains("to")) {
+                                bucket.to = rangeSpec["to"].get<double>();
+                                bucket.toSet = true;
+
+                                // Complete auto-generated key
+                                if (bucket.key.back() == '-') {
+                                    bucket.key += std::to_string(bucket.to);
+                                }
+                            } else {
+                                bucket.toSet = false;
+                                if (bucket.key.back() == '-') {
+                                    bucket.key += "*";
+                                }
+                            }
+
+                            ranges.push_back(bucket);
+                        }
+                    }
+
+                    aggResult.type = "range";
+                    aggResult.rangeBuckets = documentStore_->aggregateRange(field, ranges, matchingDocIds);
+
+                    result.aggregations[aggName] = aggResult;
+                }
             }
         }
 
@@ -1087,6 +1144,21 @@ char* diagon_search_with_filter(
                     aggJson["value"] = aggPair.second.sum;
                 } else if (aggPair.second.type == "value_count") {
                     aggJson["value"] = aggPair.second.count;
+                } else if (aggPair.second.type == "range") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.rangeBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        if (bucket.fromSet) {
+                            bucketJson["from"] = bucket.from;
+                        }
+                        if (bucket.toSet) {
+                            bucketJson["to"] = bucket.to;
+                        }
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;
@@ -1480,6 +1552,21 @@ char* diagon_distributed_search(
                     aggJson["value"] = aggPair.second.sum;
                 } else if (aggPair.second.type == "value_count") {
                     aggJson["value"] = aggPair.second.count;
+                } else if (aggPair.second.type == "range") {
+                    nlohmann::json bucketsArray = nlohmann::json::array();
+                    for (const auto& bucket : aggPair.second.rangeBuckets) {
+                        nlohmann::json bucketJson;
+                        bucketJson["key"] = bucket.key;
+                        if (bucket.fromSet) {
+                            bucketJson["from"] = bucket.from;
+                        }
+                        if (bucket.toSet) {
+                            bucketJson["to"] = bucket.to;
+                        }
+                        bucketJson["doc_count"] = bucket.docCount;
+                        bucketsArray.push_back(bucketJson);
+                    }
+                    aggJson["buckets"] = bucketsArray;
                 }
 
                 aggsJson[aggPair.second.name] = aggJson;

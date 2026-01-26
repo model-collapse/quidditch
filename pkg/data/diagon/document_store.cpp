@@ -1409,6 +1409,78 @@ int64_t DocumentStore::aggregateValueCount(
     return count;
 }
 
+// Range aggregation (count documents in numeric ranges)
+std::vector<DocumentStore::RangeBucket> DocumentStore::aggregateRange(
+    const std::string& field,
+    const std::vector<RangeBucket>& ranges,
+    const std::vector<std::string>& docIds) const {
+
+    std::shared_lock<std::shared_mutex> lock(documentsMutex_);
+
+    // Initialize result buckets with zero counts
+    std::vector<RangeBucket> result = ranges;
+    for (auto& bucket : result) {
+        bucket.docCount = 0;
+    }
+
+    // Iterate through all documents
+    for (const auto& docId : docIds) {
+        auto it = documents_.find(docId);
+        if (it == documents_.end()) {
+            continue;
+        }
+
+        try {
+            const json* current = &it->second->data;
+            std::string fieldPath = field;
+
+            // Navigate nested fields
+            size_t dotPos = 0;
+            while ((dotPos = fieldPath.find('.')) != std::string::npos) {
+                std::string key = fieldPath.substr(0, dotPos);
+                if (current->contains(key) && (*current)[key].is_object()) {
+                    current = &(*current)[key];
+                    fieldPath = fieldPath.substr(dotPos + 1);
+                } else {
+                    current = nullptr;
+                    break;
+                }
+            }
+
+            if (current && current->contains(fieldPath)) {
+                const json& value = (*current)[fieldPath];
+                if (value.is_number()) {
+                    double numValue = value.get<double>();
+
+                    // Check which ranges this value falls into
+                    // Note: A document can be counted in multiple ranges if they overlap
+                    for (size_t i = 0; i < result.size(); i++) {
+                        bool inRange = true;
+
+                        // Check lower bound
+                        if (result[i].fromSet && numValue < result[i].from) {
+                            inRange = false;
+                        }
+
+                        // Check upper bound
+                        if (result[i].toSet && numValue >= result[i].to) {
+                            inRange = false;
+                        }
+
+                        if (inRange) {
+                            result[i].docCount++;
+                        }
+                    }
+                }
+            }
+        } catch (const std::exception& e) {
+            continue;
+        }
+    }
+
+    return result;
+}
+
 // Helper: Check if string matches wildcard pattern
 bool DocumentStore::matchWildcard(const std::string& str, const std::string& pattern) const {
     size_t sLen = str.length();

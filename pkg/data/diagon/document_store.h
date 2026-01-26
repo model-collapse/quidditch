@@ -167,6 +167,15 @@ public:
         double stdDeviationBounds_lower;
     };
 
+    struct RangeBucket {
+        std::string key;          // Range label (e.g., "0-50", "50-100", "*-50")
+        double from;              // Lower bound (or -infinity if !fromSet)
+        double to;                // Upper bound (or +infinity if !toSet)
+        bool fromSet;             // Whether 'from' is specified
+        bool toSet;               // Whether 'to' is specified
+        int64_t docCount;         // Number of documents in range
+    };
+
     // Terms aggregation (faceting)
     std::vector<TermBucket> aggregateTerms(
         const std::string& field,
@@ -231,6 +240,12 @@ public:
     // Value count aggregation (count non-null values)
     int64_t aggregateValueCount(
         const std::string& field,
+        const std::vector<std::string>& docIds) const;
+
+    // Range aggregation (count documents in numeric ranges)
+    std::vector<RangeBucket> aggregateRange(
+        const std::string& field,
+        const std::vector<RangeBucket>& ranges,
         const std::vector<std::string>& docIds) const;
 
     // Statistics
