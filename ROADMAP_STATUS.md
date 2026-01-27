@@ -14,14 +14,14 @@
 Phase 0: Foundation (Months 1-2)               ████████████████ 90%  ✅ Nearly Complete
 Phase 1: Distributed Foundation (Months 3-5)  ████████████████ 100% 🎉 COMPLETE!
 Phase 2: Query Planning & UDFs (Months 6-8)   ████████████████ 100% 🎉 COMPLETE!
-Phase 3: Python Integration (Months 9-10)     ████████░░░░░░░░ 50%  ⏳ In Progress
+Phase 3: Python Integration (Months 9-10)     █████████░░░░░░░ 59%  ⏳ In Progress
 Phase 4: Production Features (Months 11-13)   ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 Phase 5: Cloud-Native (Months 14-16)          ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 ```
 
-**Overall Completion**: ~48% of 18-month roadmap
-**Ahead of Schedule**: +5 months (Phases 1 & 2 complete, Phase 3 50% done at Month 3)
+**Overall Completion**: ~49% of 18-month roadmap
+**Ahead of Schedule**: +5 months (Phases 1 & 2 complete, Phase 3 56% done at Month 3)
 
 ---
 
@@ -55,10 +55,14 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 - ✅ Memory pooling & security
 - **Completed 5 months early!**
 
-### Phase 3: Python Integration (50% ⏳)
+### Phase 3: Python Integration (59% ⏳)
 - ✅ Python UDF framework (Phase 2 complete)
-- ✅ Pipeline framework Day 1/3 (core types, registry, executor, Python stage adapter)
-- ⏳ Pipeline framework Day 2/3 (HTTP API, query/document integration)
+- ✅ Pipeline framework Day 1/3 (core types, registry, executor, Python stage adapter) - 8 hours
+- ⏳ Pipeline framework Day 2/3 (HTTP API ✅, index settings ✅, query/document integration) - 4/8 hours
+  - ✅ Task 5: HTTP API (6 REST endpoints, 25 tests passing)
+  - ✅ Task 6: Index settings integration (already implemented, 18 tests passing)
+  - ⏳ Task 7: Query pipeline execution
+  - ⏳ Task 8: Document pipeline execution
 - ⏳ Pipeline framework Day 3/3 (example pipelines, documentation)
 
 ---
@@ -109,6 +113,40 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 **Test Coverage**: 97% (36 test cases, all passing)
 **Lines of Code**: 2,000+ lines (implementation + tests)
 **Status**: Day 1 complete, committed and pushed (4e9803d)
+
+### 5. Pipeline HTTP API Complete ✅ (Jan 27 18:00)
+**What**: Implemented HTTP API for pipeline management (Phase 3.2 - Task 5)
+**Endpoints Implemented**:
+- POST `/api/v1/pipelines/{name}` - Create pipeline with validation
+- GET `/api/v1/pipelines/{name}` - Retrieve pipeline definition
+- DELETE `/api/v1/pipelines/{name}` - Delete pipeline (checks associations)
+- GET `/api/v1/pipelines` - List pipelines with optional type filtering
+- POST `/api/v1/pipelines/{name}/_execute` - Test pipeline execution
+- GET `/api/v1/pipelines/{name}/_stats` - Retrieve execution statistics
+**Features**:
+- Comprehensive validation (name consistency, type validation, duplicate detection)
+- Proper HTTP status codes (400, 404, 409, 500)
+- Test execution returns results even on failure (graceful degradation)
+- Duration metrics in milliseconds for JSON response
+**Test Coverage**: 100% (25 test cases, all passing)
+**Lines of Code**: ~1,000 lines (handlers + tests)
+**Status**: Task 5 complete, ready to commit (9a4bca9)
+
+### 6. Index Settings Integration Complete ✅ (Jan 27 18:30)
+**What**: Pipeline settings integration with index management (Phase 3.2 - Task 6)
+**Discovery**: Already implemented in coordination.go!
+**Endpoints Working**:
+- PUT `/:index` - Create index with pipeline settings
+- GET `/:index/_settings` - Retrieve pipeline associations
+- PUT `/:index/_settings` - Update pipeline associations
+**Features**:
+- All 3 pipeline types supported (query, document, result)
+- Validation (pipeline exists, correct type)
+- Error handling (400 for invalid, clear messages)
+- Non-fatal during index creation (logged warnings)
+**Test Coverage**: 100% (18 test cases, all passing)
+**Lines of Code**: Already in coordination.go + 388 new test lines
+**Status**: Task 6 complete, tests added (3c915c9)
 
 ---
 
@@ -241,5 +279,5 @@ Phase 3       █░ (25% done)
 
 ---
 
-**Last Updated**: January 27, 2026 16:00 UTC
+**Last Updated**: January 27, 2026 18:00 UTC
 **Next Review**: January 28, 2026
