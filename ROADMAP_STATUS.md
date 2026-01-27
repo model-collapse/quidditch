@@ -307,6 +307,15 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 **Revised estimate**: 6-9 months (full) or 4-5 months (subset)
 **Recommendation**: PPL Subset covers 80% of real-world log analytics queries
 
+**Update**: Created tier-based delivery plan (design/PPL_TIER_PLAN.md)
+- **Tier 0** (6 weeks): Foundation - 8 commands, 70 functions (MVP)
+- **Tier 1** (8 weeks): Analytics - +7 commands, +65 functions (Production-ready) ⭐
+- **Tier 2** (10 weeks): Advanced - +9 commands, +30 functions (Power users)
+- **Tier 3** (8 weeks): Enterprise - +12 commands, +23 functions (Feature-complete)
+- **Tier 4** (8 weeks): ML & Experimental - +8 commands (DEPRIORITIZED)
+
+**Recommended**: T0 + T1 = 14 weeks, 15 commands (34%), 135 functions (70%), 80% coverage
+
 ---
 
 ## Pipeline Framework Day 3 Continued
