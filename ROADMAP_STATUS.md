@@ -269,6 +269,49 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 **What**: Example pipelines and comprehensive documentation (Phase 3.3 - final task!)
 **Deliverables**:
 - 3 production-ready example pipelines:
+
+### 13. PPL Scope Discovery & Comprehensive Plan ✅ (Jan 27 17:00)
+**What**: Researched OpenSearch SQL plugin to understand real PPL scope
+**Reality Check** (Major Scope Correction):
+- **Commands**: 44 (not 10!) - 8 categories
+  - Data Retrieval: 3 commands
+  - Filtering & Selection: 3 commands
+  - Data Transformation: 10 commands
+  - Aggregation & Statistics: 7 commands
+  - Data Combination: 6 commands (joins, subqueries)
+  - Sorting & Ordering: 5 commands
+  - Machine Learning: 4 commands
+  - Specialized Operations: 6 commands
+- **Functions**: 192 across 13 categories
+  - Date/Time: 57 functions
+  - Math: 41 functions
+  - Aggregation: 20 functions
+  - String: 17 functions
+  - Conditional: 14 functions
+  - Collections, JSON, Relevance, Type conversion, etc.: 43 functions
+- **Complex Features**:
+  - Subqueries (4 types: IN, EXISTS, scalar, relation)
+  - Joins (inner, left, semi, anti, outer)
+  - Window functions (ROW_NUMBER, RANK, etc.)
+  - Pattern parsing (grok, regex, patterns)
+  - Machine learning integration
+**Deliverables**:
+- Comprehensive 1,000-line implementation plan
+- ANTLR4 grammar analysis (100+ tokens, 150+ rules)
+- Phased approach (4 phases, 38-46 weeks)
+- Recommended PPL Subset: 22 commands, 135 functions (18-22 weeks)
+**Impact**: Realistic scoping for Phase 4 planning
+**Status**: Plan documented, awaiting stakeholder decision (design/PPL_IMPLEMENTATION_PLAN.md)
+
+**Original estimate**: 6 weeks
+**Revised estimate**: 6-9 months (full) or 4-5 months (subset)
+**Recommendation**: PPL Subset covers 80% of real-world log analytics queries
+
+---
+
+## Pipeline Framework Day 3 Continued
+
+**Example Pipelines** (from achievement #12 above):
   1. **synonym_expansion.py** (125 lines) - Query preprocessing
      - Expands query terms with synonyms (laptop → laptop OR notebook OR computer)
      - Use case: Improve recall in e-commerce, job search
@@ -355,9 +398,13 @@ Phase 3       ██ (100% done - 6 months early! 🎉)
 11. Begin Phase 4: Background merge scheduler (async segment merging)
 
 ### Medium Term (Months 4-6)
-11. Phase 4: PPL support (90%)
-12. Phase 4: Production hardening
-13. Begin Phase 5: Cloud-native features
+12. Phase 4: PPL support - **REVISED SCOPE**
+    - 44 commands (not 10!) across 8 categories
+    - 192 functions across 13 categories
+    - Estimated 6-9 months with 3-4 engineers
+    - **Recommendation**: PPL Subset (22 commands, 135 functions) - 18-22 weeks
+13. Phase 4: Production hardening
+14. Begin Phase 5: Cloud-native features
 
 ---
 
