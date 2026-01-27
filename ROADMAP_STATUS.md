@@ -14,14 +14,14 @@
 Phase 0: Foundation (Months 1-2)               ████████████████ 90%  ✅ Nearly Complete
 Phase 1: Distributed Foundation (Months 3-5)  ████████████████ 100% 🎉 COMPLETE!
 Phase 2: Query Planning & UDFs (Months 6-8)   ████████████████ 100% 🎉 COMPLETE!
-Phase 3: Python Integration (Months 9-10)     ███████████░░░░░ 73%  ⏳ In Progress
+Phase 3: Python Integration (Months 9-10)     ██████████████░░ 88%  ⏳ In Progress
 Phase 4: Production Features (Months 11-13)   ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 Phase 5: Cloud-Native (Months 14-16)          ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░░░░░░ 0%   ⏳ Not Started
 ```
 
-**Overall Completion**: ~50% of 18-month roadmap
-**Ahead of Schedule**: +5 months (Phases 1 & 2 complete, Phase 3 64% done at Month 3)
+**Overall Completion**: ~52% of 18-month roadmap
+**Ahead of Schedule**: +5 months (Phases 1 & 2 complete, Phase 3 88% done at Month 3)
 
 ---
 
@@ -55,7 +55,7 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 - ✅ Memory pooling & security
 - **Completed 5 months early!**
 
-### Phase 3: Python Integration (73% ⏳)
+### Phase 3: Python Integration (88% ⏳)
 - ✅ Python UDF framework (Phase 2 complete)
 - ✅ Pipeline framework Day 1/3 (core types, registry, executor, Python stage adapter) - 8 hours
 - ✅ Pipeline framework Day 2/3 (HTTP API, index settings, query/document integration) - 8/8 hours ✅ COMPLETE!
@@ -71,6 +71,10 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
   - ✅ C API + Go integration (CGO bindings)
   - ✅ Index configuration (AnalyzerSettings, caching)
   - ✅ 17 tests passing, 3,300 lines of code
+- ✅ Architecture cleanup (Task 10: 2 hours) ✅ COMPLETE!
+  - ✅ Moved C API to Diagon upstream (100% C++ separation)
+  - ✅ Bridge layer reduced from 2,263 lines to 0 (100% reduction)
+  - ✅ Documentation: REPOSITORY_ARCHITECTURE.md, ARCHITECTURE_CLEANUP_PLAN.md
 - ⏳ Pipeline framework Day 3/3 (example pipelines, documentation) - 0/12 hours
 
 ---
@@ -216,6 +220,26 @@ Phase 6: Optimization (Months 17-18)          ░░░░░░░░░░░�
 **Files**: 28 files (25 C++, 3 Go)
 **Status**: Task 9 complete, analyzer framework production-ready (83543c0)
 
+### 10. Architecture Cleanup Complete ✅ (Jan 27 15:35)
+**What**: Established clean repository boundaries (Phase 3.2 - Task 10)
+**Problem**: C API and query implementations misplaced in Quidditch bridge layer
+**Solution**: Moved all C++ code from Quidditch to Diagon upstream
+**Changes**:
+- Moved diagon_c_api.{h,cpp} to diagon/src/core/src/c_api/
+- Moved MatchAllDocsQuery to diagon/src/core/src/search/
+- Deleted entire c_api_src/ directory from Quidditch (6 files, 2,263 lines)
+- Updated CGO includes in bridge.go to use upstream/src/core/include
+**Results**:
+- Bridge layer: 2,263 lines → 0 lines (100% reduction)
+- Diagon: Now 100% C++ with complete C API
+- Quidditch: Go + CGO bindings only (no C++ bridge code)
+- All 17 tests passing, build successful
+**Commits**:
+- Diagon: 6db876c - Move C API to upstream
+- Quidditch: b211361 - Use upstream C API, remove bridge duplicates
+**Documentation**: REPOSITORY_ARCHITECTURE.md, ARCHITECTURE_CLEANUP_PLAN.md
+**Status**: Architecture cleanup complete, clean separation established
+
 ---
 
 ## Key Metrics
@@ -347,5 +371,5 @@ Phase 3       █░ (25% done)
 
 ---
 
-**Last Updated**: January 27, 2026 23:00 UTC
+**Last Updated**: January 27, 2026 15:35 UTC
 **Next Review**: January 28, 2026
