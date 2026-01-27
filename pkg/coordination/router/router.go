@@ -97,13 +97,23 @@ func (dr *DocumentRouter) RouteIndexDocument(ctx context.Context, indexName, doc
 	}
 
 	// Route to data node
-	dr.logger.Debug("Routing index document",
+	dr.logger.Info("Routing index document to data node",
 		zap.String("index", indexName),
 		zap.String("doc_id", docID),
 		zap.Int32("shard_id", shardID),
 		zap.String("node_id", nodeID))
 
-	return client.IndexDocument(ctx, indexName, shardID, docID, document)
+	resp, err := client.IndexDocument(ctx, indexName, shardID, docID, document)
+	if err != nil {
+		dr.logger.Error("IndexDocument call failed", zap.Error(err))
+		return nil, err
+	}
+
+	dr.logger.Info("IndexDocument succeeded",
+		zap.String("doc_id", docID),
+		zap.Int64("version", resp.Version))
+
+	return resp, nil
 }
 
 // RouteGetDocument routes a get document operation to the correct shard

@@ -19,11 +19,11 @@ GOFMT := gofmt
 GOLINT := golangci-lint
 
 # Build flags
-GO_LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)"
 ifeq ($(BUILD_MODE),release)
-	GO_LDFLAGS += -s -w
+	GO_LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)"
 	GO_BUILD_FLAGS := -trimpath
 else
+	GO_LDFLAGS := -ldflags "-X main.Version=$(VERSION) -X main.CommitHash=$(COMMIT_HASH) -X main.BuildTime=$(BUILD_TIME)"
 	GO_BUILD_FLAGS := -race
 endif
 
@@ -84,13 +84,18 @@ $(QCTL_BIN): $(shell find $(CMD_DIR)/qctl $(PKG_DIR) -name '*.go')
 	@mkdir -p $(BIN_DIR)
 	$(GOBUILD) $(GO_BUILD_FLAGS) $(GO_LDFLAGS) -o $@ ./$(CMD_DIR)/qctl
 
-diagon: ## Build Diagon C++ library
-	@echo "Building Diagon..."
-	@cd $(DIAGON_DIR) && \
+diagon: ## Build real Diagon C++ search engine and C API wrapper
+	@echo "Building real Diagon C++ engine..."
+	@cd pkg/data/diagon/upstream && \
 		mkdir -p build && \
 		cd build && \
-		cmake -DCMAKE_BUILD_TYPE=$(BUILD_MODE) .. && \
-		make -j$$(nproc)
+		cmake .. -DCMAKE_BUILD_TYPE=Release \
+			-DDIAGON_BUILD_TESTS=OFF \
+			-DDIAGON_BUILD_BENCHMARKS=OFF && \
+		cmake --build . -j$$(nproc)
+	@echo "Building Diagon C API wrapper..."
+	@cd pkg/data/diagon && ./build_c_api.sh
+	@echo "✓ Diagon integration complete"
 
 python: ## Build Python package
 	@echo "Building Python package..."
@@ -282,7 +287,9 @@ clean-go: ## Clean Go build artifacts
 
 clean-diagon: ## Clean Diagon build artifacts
 	@echo "Cleaning Diagon artifacts..."
-	@rm -rf $(DIAGON_DIR)/build
+	@rm -rf pkg/data/diagon/upstream/build
+	@rm -rf pkg/data/diagon/build
+	@rm -f pkg/data/diagon/libdiagon.so
 
 clean-python: ## Clean Python artifacts
 	@echo "Cleaning Python artifacts..."

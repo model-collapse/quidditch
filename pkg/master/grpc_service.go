@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/google/uuid"
 	pb "github.com/quidditch/quidditch/pkg/common/proto"
 	"github.com/quidditch/quidditch/pkg/master/raft"
 	"go.uber.org/zap"
@@ -93,31 +92,8 @@ func (s *MasterService) CreateIndex(ctx context.Context, req *pb.CreateIndexRequ
 		return nil, status.Errorf(codes.FailedPrecondition, "not the leader, redirect to %s", s.node.Leader())
 	}
 
-	// Create index metadata
-	index := &raft.IndexMeta{
-		Name:        req.IndexName,
-		UUID:        uuid.New().String(),
-		Version:     1,
-		NumShards:   req.Settings.NumberOfShards,
-		NumReplicas: req.Settings.NumberOfReplicas,
-		Settings:    make(map[string]string),
-		State:       "open",
-		CreatedAt:   time.Now().Unix(),
-	}
-
-	// Marshal payload
-	payload, err := json.Marshal(index)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "failed to marshal index: %v", err)
-	}
-
-	// Apply command through Raft
-	cmd := raft.Command{
-		Type:    raft.CommandCreateIndex,
-		Payload: payload,
-	}
-
-	if err := s.node.raftNode.Apply(cmd, 5*time.Second); err != nil {
+	// Use MasterNode.CreateIndex which includes shard allocation
+	if err := s.node.CreateIndex(ctx, req.IndexName, req.Settings.NumberOfShards, req.Settings.NumberOfReplicas); err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create index: %v", err)
 	}
 
@@ -440,11 +416,34 @@ func (s *MasterService) convertIndicesToProto(indices map[string]*raft.IndexMeta
 }
 
 func (s *MasterService) convertRoutingTableToProto(routing map[string]*raft.ShardRouting) *pb.RoutingTable {
-	// TODO: Implement routing table conversion
-	_ = routing
+	indices := make(map[string]*pb.IndexRoutingTable)
+
+	// Group shards by index name
+	for _, shard := range routing {
+		indexName := shard.IndexName
+
+		// Create index routing table if it doesn't exist
+		if _, exists := indices[indexName]; !exists {
+			indices[indexName] = &pb.IndexRoutingTable{
+				IndexName: indexName,
+				Shards:    make(map[int32]*pb.ShardRouting),
+			}
+		}
+
+		// Add shard routing
+		indices[indexName].Shards[shard.ShardID] = &pb.ShardRouting{
+			ShardId:   shard.ShardID,
+			IsPrimary: shard.IsPrimary,
+			Allocation: &pb.ShardAllocation{
+				NodeId: shard.NodeID,
+				State:  pb.ShardAllocation_SHARD_STATE_STARTED, // Assume started for now
+			},
+		}
+	}
+
 	return &pb.RoutingTable{
 		Version: 1,
-		Indices: make(map[string]*pb.IndexRoutingTable),
+		Indices: indices,
 	}
 }
 

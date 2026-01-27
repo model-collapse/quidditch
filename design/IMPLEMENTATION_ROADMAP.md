@@ -305,9 +305,9 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 
 ### Phase 2: Query Parsing & Planning (Months 6-8)
 
-**Goal**: OpenSearch DSL support + Calcite integration
+**Goal**: OpenSearch DSL support + Custom Go query planner + WASM UDF foundation
 
-**Team**: 3 engineers (2 Go, 1 Java)
+**Team**: 3 engineers (3 Go engineers, no Java required)
 
 **Components**:
 
@@ -319,39 +319,73 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 
 **Estimated Time**: 4 weeks
 
-#### 2.2 Calcite Integration (Java/Go)
-- Calcite microservice (gRPC)
-- DSL → Calcite RelNode translation
-- Rule-based optimization
-- Cost-based optimization (cardinality estimation)
+#### 2.2 Built-in Query Planner (Go)
+**Design**: Custom Go implementation learning from Apache Calcite principles
+
+- Logical plan representation (inspired by Calcite's RelNode)
+- Rule-based optimizer (predicate pushdown, filter merging)
+- Cost model for index selection (cardinality estimation)
 - Physical plan generation
+- Query rewriting and normalization
 
-**Estimated Time**: 8 weeks
+**Why not external Calcite?**
+- Pure Go stack (no Java/JVM dependency)
+- Lower latency (no gRPC to external service)
+- Simpler deployment (no Java microservice)
+- Sufficient for search workloads (most queries are simple)
 
-#### 2.3 Physical Plan Execution (Go)
+**Estimated Time**: 6 weeks
+
+#### 2.3 Expression Tree & WASM UDF (Go + C++)
+**Script Pushdown Solution**:
+
+**Expression Trees** (for 75-80% of use cases):
+- Native C++ evaluation (5ns per call)
+- Simple math: `price * 1.2 > 100`
+- Boolean logic, field access, comparisons
+- Predefined operations only
+
+**WASM UDF Framework** (for 15-20% of use cases):
+- WebAssembly runtime integration (wasm3 + Wasmtime)
+- Tiered compilation (interpreter → JIT)
+- Near-native performance (20ns per call)
+- Language-agnostic (Rust, C, AssemblyScript, Go)
+- Sandboxed security
+- UDF deployment and versioning API
+
+**Estimated Time**: 6 weeks
+
+#### 2.4 Physical Plan Execution (Go)
 - Distributed execution engine
 - Task scheduling (shard-level)
 - Result streaming
 - Aggregation merge logic
+- Expression tree evaluation integration
+- WASM UDF invocation
 
-**Estimated Time**: 6 weeks
+**Estimated Time**: 4 weeks
 
 **Deliverables**:
 - Full DSL support (all P0/P1 queries)
-- Calcite-based query optimizer
-- Push-down optimizations (filter, projection)
+- Custom Go query planner with logical plan representation
+- Expression tree pushdown (80% of use cases)
+- WASM UDF framework with tiered compilation
+- Push-down optimizations (filter, projection, expression)
 - Query explain API
 
 **Success Criteria**:
 - All OpenSearch examples work
 - 10-30% query speedup from optimizations
 - <200ms p99 for complex queries
+- Expression tree evaluation: 5ns per call
+- WASM UDF (JIT): 20ns per call
+- Zero per-query compilation overhead
 
 ---
 
-### Phase 3: Python Integration (Months 9-10)
+### Phase 3: Python Integration & Advanced UDFs (Months 9-10)
 
-**Goal**: Python pipeline framework
+**Goal**: Python pipeline framework + Python UDF pushdown for ML workloads
 
 **Team**: 2 engineers (1 Go/Python, 1 Python)
 
@@ -373,25 +407,45 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 
 **Estimated Time**: 3 weeks
 
-#### 3.3 Example Pipelines
+#### 3.3 Python UDF Pushdown (Go + Python + C++)
+**Multi-Tiered UDF Completion**:
+
+- Python UDF execution in data nodes (embedded CPython)
+- UDF registry and versioning
+- Performance: 500ns per call (suitable for ML inference)
+- Use cases: ML models, complex transformations (5% of workloads)
+
+**Completes the UDF stack**:
+1. Expression Trees (80%) - 5ns/call - Simple math
+2. WASM UDFs (15%) - 20ns/call - Custom logic
+3. Python UDFs (5%) - 500ns/call - ML models ← **This phase**
+
+**Estimated Time**: 2 weeks
+
+#### 3.4 Example Pipelines
 - Synonym expansion
 - Spell correction
 - ML re-ranking (ONNX)
 - Access control
 - A/B testing framework
+- Custom scoring functions (Python UDF examples)
 
 **Estimated Time**: 3 weeks
 
 **Deliverables**:
 - Python SDK (`pip install quidditch-sdk`)
 - 5+ example pipelines
+- Python UDF framework (pushdown to data nodes)
 - Pipeline deployment API
+- WASM native code cache (5ms re-deploys)
 - Documentation and tutorials
 
 **Success Criteria**:
 - Pipeline latency overhead <20ms
 - ONNX inference <50ms (1000 docs)
 - Zero downtime pipeline updates
+- Python UDF: 500ns per call
+- 95% of UDF use cases covered (Expression + WASM + Python)
 
 ---
 
@@ -414,8 +468,8 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 
 #### 4.2 PPL Support (90%)
 - PPL parser
-- PPL → SQL translation
-- Integration with Calcite
+- PPL → Internal query representation translation
+- Integration with built-in Go planner
 - PPL-specific optimizations
 
 **Estimated Time**: 6 weeks
@@ -567,7 +621,7 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 | **Master Nodes** | Go | Distributed systems, Raft, gRPC |
 | **Coordination Nodes** | Go + Python | Orchestration (Go), Pipelines (Python) |
 | **Data Nodes** | C++ (Diagon) | Performance, SIMD, existing codebase |
-| **Query Planner** | Java (Calcite) | Mature query optimizer |
+| **Query Planner** | Go | Custom built-in planner, learning from Calcite principles |
 | **Pipelines** | Python | ML/NLP ecosystem, ease of use |
 
 ### Key Dependencies
@@ -589,10 +643,6 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 - ONNX Runtime (inference)
 - Requests (HTTP client)
 
-**Java**:
-- Apache Calcite (query planning)
-- gRPC (RPC)
-
 **Infrastructure**:
 - Kubernetes (orchestration)
 - Helm (packaging)
@@ -610,7 +660,7 @@ This document outlines the implementation plan for Quidditch, a distributed sear
 | Risk | Probability | Impact | Mitigation |
 |------|-------------|--------|------------|
 | **Diagon core incomplete** | Medium | High | Focus Phase 0, dedicate C++ resources |
-| **Calcite integration complexity** | Medium | Medium | Start early, build gRPC service |
+| **Custom planner complexity** | Low | Medium | Iterative development, extensive testing |
 | **Python performance overhead** | Low | Medium | Profile, optimize, fallback to Go |
 | **SIMD portability (ARM)** | Low | Low | Detect and fallback to scalar |
 | **Distributed consensus bugs** | Medium | High | Use battle-tested etcd/raft library |
@@ -694,7 +744,7 @@ Phase 6: Optimization       |    |    |    |    |    |    |    |    |    |    | 
 Milestones:
   M0: Diagon 1.0 (Month 2)
   M1: 3-Node Cluster (Month 5)
-  M2: DSL + Calcite (Month 8)
+  M2: DSL + Built-in Planner (Month 8)
   M3: Python Pipelines (Month 10)
   M4: Production Ready (Month 13)
   M5: Kubernetes Operator (Month 16)
@@ -707,7 +757,7 @@ Milestones:
 |-----------|-------|-------------|
 | **M0: Diagon 1.0** | 2 | Single-node search engine complete |
 | **M1: Distributed MVP** | 5 | 3-node cluster, basic CRUD |
-| **M2: Query Engine** | 8 | DSL + Calcite integration |
+| **M2: Query Engine** | 8 | DSL + Built-in Go planner + WASM UDF |
 | **M3: Python Pipelines** | 10 | Pipeline framework, examples |
 | **M4: Production Ready** | 13 | Security, observability, PPL |
 | **M5: Cloud-Native** | 16 | Kubernetes operator, ILM |
@@ -726,8 +776,9 @@ Milestones:
 
 ### Key Decisions
 
-- [ ] Language choice confirmed (Go + C++ + Python)
-- [ ] Calcite vs alternative query planners
+- [x] Language choice confirmed (Go + C++ + Python)
+- [x] Query planner approach (custom Go implementation learning from Calcite principles)
+- [x] UDF approach (Expression Trees + WASM + Python, multi-tiered)
 - [ ] Kubernetes vs other orchestration
 - [ ] Cloud provider (AWS, GCP, Azure)
 - [ ] Licensing (Apache 2.0)

@@ -3,7 +3,10 @@ package data
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/quidditch/quidditch/pkg/common/config"
@@ -85,6 +88,9 @@ func (sm *ShardManager) CreateShard(ctx context.Context, indexName string, shard
 
 	// Create shard directory
 	shardPath := filepath.Join(sm.cfg.DataDir, indexName, fmt.Sprintf("shard_%d", shardID))
+	if err := os.MkdirAll(shardPath, 0755); err != nil {
+		return fmt.Errorf("failed to create shard directory: %w", err)
+	}
 
 	// Create shard using Diagon
 	diagonShard, err := sm.diagon.CreateShard(shardPath)
@@ -188,8 +194,113 @@ func (sm *ShardManager) List() []*Shard {
 
 // loadShards loads existing shards from disk
 func (sm *ShardManager) loadShards() error {
-	// TODO: Scan data directory and load existing shards
 	sm.logger.Info("Loading shards from disk", zap.String("data_dir", sm.cfg.DataDir))
+
+	// Check if data directory exists
+	if _, err := os.Stat(sm.cfg.DataDir); os.IsNotExist(err) {
+		sm.logger.Info("Data directory does not exist yet, no shards to load")
+		return nil
+	}
+
+	// Scan data directory for index directories
+	indexEntries, err := os.ReadDir(sm.cfg.DataDir)
+	if err != nil {
+		return fmt.Errorf("failed to read data directory: %w", err)
+	}
+
+	shardsLoaded := 0
+	for _, indexEntry := range indexEntries {
+		if !indexEntry.IsDir() {
+			continue
+		}
+
+		indexName := indexEntry.Name()
+		indexPath := filepath.Join(sm.cfg.DataDir, indexName)
+
+		// Scan for shard directories (format: shard_0, shard_1, etc.)
+		shardEntries, err := os.ReadDir(indexPath)
+		if err != nil {
+			sm.logger.Warn("Failed to read index directory",
+				zap.String("index", indexName),
+				zap.Error(err))
+			continue
+		}
+
+		for _, shardEntry := range shardEntries {
+			if !shardEntry.IsDir() {
+				continue
+			}
+
+			shardDirName := shardEntry.Name()
+			if !strings.HasPrefix(shardDirName, "shard_") {
+				continue
+			}
+
+			// Extract shard ID from directory name (e.g., "shard_0" -> 0)
+			shardIDStr := strings.TrimPrefix(shardDirName, "shard_")
+			shardID, err := strconv.ParseInt(shardIDStr, 10, 32)
+			if err != nil {
+				sm.logger.Warn("Invalid shard directory name",
+					zap.String("name", shardDirName),
+					zap.Error(err))
+				continue
+			}
+
+			// Load the shard (CreateShard uses CREATE_OR_APPEND mode, so it will open existing)
+			shardPath := filepath.Join(indexPath, shardDirName)
+			key := shardKey(indexName, int32(shardID))
+
+			// Check if shard is already loaded (shouldn't happen, but be safe)
+			sm.mu.RLock()
+			_, exists := sm.shards[key]
+			sm.mu.RUnlock()
+			if exists {
+				sm.logger.Debug("Shard already loaded, skipping",
+					zap.String("index", indexName),
+					zap.Int64("shard_id", shardID))
+				continue
+			}
+
+			// Create/open the Diagon shard
+			diagonShard, err := sm.diagon.CreateShard(shardPath)
+			if err != nil {
+				sm.logger.Error("Failed to load shard from disk",
+					zap.String("index", indexName),
+					zap.Int64("shard_id", shardID),
+					zap.String("path", shardPath),
+					zap.Error(err))
+				continue
+			}
+
+			// Create shard wrapper
+			shard := &Shard{
+				IndexName:   indexName,
+				ShardID:     int32(shardID),
+				IsPrimary:   false, // Will be set by master during registration
+				Path:        shardPath,
+				State:       ShardStateStarted,
+				DiagonShard: diagonShard,
+				udfFilter:   sm.udfFilter,
+				DocsCount:   0, // TODO: Could load actual count from Diagon
+				SizeBytes:   0, // TODO: Could calculate from disk
+				logger:      sm.logger.With(zap.String("shard", key)),
+			}
+
+			sm.mu.Lock()
+			sm.shards[key] = shard
+			sm.mu.Unlock()
+
+			shardsLoaded++
+			sm.logger.Info("Loaded shard from disk",
+				zap.String("index", indexName),
+				zap.Int32("shard_id", int32(shardID)),
+				zap.String("path", shardPath))
+		}
+	}
+
+	sm.logger.Info("Shard loading complete",
+		zap.Int("shards_loaded", shardsLoaded))
+
 	return nil
 }
 
@@ -228,18 +339,47 @@ func (s *Shard) IndexDocument(ctx context.Context, docID string, doc map[string]
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	s.logger.Info("==> Shard.IndexDocument ENTRY",
+		zap.String("index", s.IndexName),
+		zap.Int32("shard_id", s.ShardID),
+		zap.String("doc_id", docID))
+
 	if s.State != ShardStateStarted {
 		return fmt.Errorf("shard is not ready")
 	}
 
 	// Index document using Diagon
+	s.logger.Info("Calling DiagonShard.IndexDocument", zap.String("doc_id", docID))
 	if err := s.DiagonShard.IndexDocument(docID, doc); err != nil {
+		s.logger.Error("DiagonShard.IndexDocument FAILED", zap.Error(err))
 		return fmt.Errorf("failed to index document: %w", err)
 	}
 
+	s.logger.Info("DiagonShard.IndexDocument SUCCESS", zap.String("doc_id", docID))
+
+	// CRITICAL FIX: Commit the document to disk so it's searchable
+	s.logger.Info("Calling DiagonShard.Commit to flush to disk", zap.String("doc_id", docID))
+	if err := s.DiagonShard.Commit(); err != nil {
+		s.logger.Error("DiagonShard.Commit FAILED", zap.Error(err))
+		return fmt.Errorf("failed to commit document: %w", err)
+	}
+
+	s.logger.Info("DiagonShard.Commit SUCCESS - document now on disk", zap.String("doc_id", docID))
+
+	// CRITICAL FIX: Refresh the reader so searches can see the new document
+	s.logger.Info("Calling DiagonShard.Refresh to reopen reader", zap.String("doc_id", docID))
+	if err := s.DiagonShard.Refresh(); err != nil {
+		s.logger.Error("DiagonShard.Refresh FAILED", zap.Error(err))
+		return fmt.Errorf("failed to refresh reader: %w", err)
+	}
+
+	s.logger.Info("DiagonShard.Refresh SUCCESS - document now searchable", zap.String("doc_id", docID))
+
 	s.DocsCount++
 
-	s.logger.Debug("Indexed document", zap.String("doc_id", docID))
+	s.logger.Info("Indexed document successfully",
+		zap.String("doc_id", docID),
+		zap.Int64("docs_count", s.DocsCount))
 
 	return nil
 }

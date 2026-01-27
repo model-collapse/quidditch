@@ -149,35 +149,62 @@ func (s *DataService) FlushShard(ctx context.Context, req *pb.FlushShardRequest)
 
 // IndexDocument indexes a document into a shard
 func (s *DataService) IndexDocument(ctx context.Context, req *pb.IndexDocumentRequest) (*pb.IndexDocumentResponse, error) {
-	s.logger.Debug("IndexDocument request",
+	s.logger.Info("==> DataService.IndexDocument ENTRY",
 		zap.String("index", req.IndexName),
 		zap.Int32("shard_id", req.ShardId),
 		zap.String("doc_id", req.DocId))
 
 	// Validate request
 	if req.IndexName == "" {
+		s.logger.Error("IndexDocument validation failed: index name is required")
 		return nil, status.Error(codes.InvalidArgument, "index name is required")
 	}
 	if req.DocId == "" {
+		s.logger.Error("IndexDocument validation failed: doc_id is required")
 		return nil, status.Error(codes.InvalidArgument, "doc_id is required")
 	}
 	if req.Document == nil {
+		s.logger.Error("IndexDocument validation failed: document is required")
 		return nil, status.Error(codes.InvalidArgument, "document is required")
 	}
 
+	s.logger.Info("IndexDocument validation passed", zap.String("doc_id", req.DocId))
+
 	// Get shard
+	s.logger.Info("Getting shard",
+		zap.String("index", req.IndexName),
+		zap.Int32("shard_id", req.ShardId))
 	shard, err := s.node.shards.GetShard(req.IndexName, req.ShardId)
 	if err != nil {
+		s.logger.Error("Failed to get shard",
+			zap.String("index", req.IndexName),
+			zap.Int32("shard_id", req.ShardId),
+			zap.Error(err))
 		return nil, status.Errorf(codes.NotFound, "shard not found: %v", err)
 	}
 
+	s.logger.Info("Got shard successfully", zap.String("doc_id", req.DocId))
+
 	// Convert protobuf Struct to map
 	doc := req.Document.AsMap()
+	s.logger.Info("Converted document to map",
+		zap.String("doc_id", req.DocId),
+		zap.Int("num_fields", len(doc)))
 
 	// Index document
+	s.logger.Info("Calling shard.IndexDocument", zap.String("doc_id", req.DocId))
 	if err := shard.IndexDocument(ctx, req.DocId, doc); err != nil {
+		s.logger.Error("shard.IndexDocument FAILED",
+			zap.String("doc_id", req.DocId),
+			zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "failed to index document: %v", err)
 	}
+
+	s.logger.Info("shard.IndexDocument SUCCESS", zap.String("doc_id", req.DocId))
+
+	s.logger.Info("Returning IndexDocumentResponse",
+		zap.String("doc_id", req.DocId),
+		zap.Int64("version", 1))
 
 	return &pb.IndexDocumentResponse{
 		Acknowledged: true,
@@ -210,7 +237,12 @@ func (s *DataService) GetDocument(ctx context.Context, req *pb.GetDocumentReques
 	// Get document
 	doc, err := shard.GetDocument(ctx, req.DocId)
 	if err != nil {
-		// Document not found
+		// Document not found - log the actual error
+		s.logger.Warn("GetDocument failed",
+			zap.String("index", req.IndexName),
+			zap.Int32("shard_id", req.ShardId),
+			zap.String("doc_id", req.DocId),
+			zap.Error(err))
 		return &pb.GetDocumentResponse{
 			Found: false,
 			DocId: req.DocId,
@@ -319,15 +351,18 @@ func (s *DataService) BulkIndex(ctx context.Context, req *pb.BulkIndexRequest) (
 
 // Search executes a search query on a shard
 func (s *DataService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.SearchResponse, error) {
-	s.logger.Debug("Search request",
+	s.logger.Info("==> DataService.Search ENTRY",
 		zap.String("index", req.IndexName),
-		zap.Int32("shard_id", req.ShardId))
+		zap.Int32("shard_id", req.ShardId),
+		zap.String("query", string(req.Query)))
 
 	// Validate request
 	if req.IndexName == "" {
+		s.logger.Error("Search failed: index name is required")
 		return nil, status.Error(codes.InvalidArgument, "index name is required")
 	}
 	if req.Query == nil {
+		s.logger.Error("Search failed: query is required")
 		return nil, status.Error(codes.InvalidArgument, "query is required")
 	}
 
@@ -339,9 +374,25 @@ func (s *DataService) Search(ctx context.Context, req *pb.SearchRequest) (*pb.Se
 
 	startTime := time.Now()
 
+	s.logger.Info("DEBUG: About to call shard.Search",
+		zap.String("index", req.IndexName),
+		zap.Int32("shard_id", req.ShardId))
+
 	// Execute search (UDF queries are embedded in req.Query JSON)
 	result, err := shard.Search(ctx, req.Query)
+
+	s.logger.Info("DEBUG: shard.Search returned",
+		zap.Bool("has_result", result != nil),
+		zap.Bool("has_error", err != nil))
+
+	if result != nil {
+		s.logger.Info("DEBUG: Search result details",
+			zap.Int64("total_hits", result.TotalHits),
+			zap.Int("num_hits", len(result.Hits)))
+	}
+
 	if err != nil {
+		s.logger.Error("DEBUG: Search error", zap.Error(err))
 		return nil, status.Errorf(codes.Internal, "search failed: %v", err)
 	}
 
@@ -551,11 +602,11 @@ func convertAggregations(aggs map[string]diagon.AggregationResult) map[string]*p
 			pbAgg.Sum = agg.Sum
 
 			if agg.Type == "extended_stats" {
-				pbAgg.SumOfSquares = agg.SumOfSquares
-				pbAgg.Variance = agg.Variance
-				pbAgg.StdDeviation = agg.StdDeviation
-				pbAgg.StdDeviationBoundsUpper = agg.StdDeviationBoundsUpper
-				pbAgg.StdDeviationBoundsLower = agg.StdDeviationBoundsLower
+// 				pbAgg.SumOfSquares = agg.SumOfSquares
+// 				pbAgg.Variance = agg.Variance
+// 				pbAgg.StdDeviation = agg.StdDeviation
+// 				pbAgg.StdDeviationBoundsUpper = agg.StdDeviationBoundsUpper
+// 				pbAgg.StdDeviationBoundsLower = agg.StdDeviationBoundsLower
 			}
 
 		case "avg":

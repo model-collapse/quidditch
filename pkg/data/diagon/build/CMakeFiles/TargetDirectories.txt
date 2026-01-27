@@ -1,7 +1,0 @@
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/diagon_expression.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/edit_cache.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/rebuild_cache.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/list_install_components.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/install.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/install/local.dir
-/home/ubuntu/quidditch/pkg/data/diagon/build/CMakeFiles/install/strip.dir

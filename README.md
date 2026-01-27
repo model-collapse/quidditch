@@ -19,7 +19,7 @@ Quidditch is a **distributed, cloud-native search engine** that provides 100% Op
 ✅ **100% OpenSearch API Compatibility**
 - Index Management, Document APIs, Search APIs
 - Full Query DSL support
-- 90% PPL (Piped Processing Language) support
+- 90% PPL (Piped Processing Language) support planned (Phase 4)
 
 ✅ **High Performance**
 - Diagon core: Lucene-style inverted index + ClickHouse columnar storage
@@ -47,10 +47,11 @@ Quidditch is a **distributed, cloud-native search engine** that provides 100% Op
 - S3/MinIO/Ceph integration
 
 ✅ **Query Optimization**
-- Apache Calcite-based logical planning
-- Cost-based optimization
-- Push-down filters and projections
+- Custom Go query planner (learning from Calcite principles)
+- Cost-based optimization with logical plan representation
+- Push-down filters, projections, and UDFs
 - Hybrid inverted + columnar scans
+- Multi-tiered UDFs: Expression Trees (80%) + WASM (15%) + Python (5%)
 
 ---
 
@@ -76,7 +77,7 @@ Quidditch is a **distributed, cloud-native search engine** that provides 100% Op
 │                            ↓                                   │
 │  ┌────────────────────────────────────────────────────────┐  │
 │  │            Coordination Nodes (Query Planning)         │  │
-│  │   • DSL/PPL parsing       • Calcite optimizer          │  │
+│  │   • DSL/PPL parsing       • Custom Go query planner    │  │
 │  │   • Python pipelines      • Result aggregation         │  │
 │  └────────────────────────────────────────────────────────┘  │
 │                            ↓                                   │
@@ -460,10 +461,10 @@ class PersonalizedRankingProcessor(Processor):
 
 ---
 
-### 3. Real-Time Analytics (PPL)
+### 3. Real-Time Analytics (PPL - Planned Phase 4)
 
 ```sql
--- PPL query for time-series analytics
+-- PPL query for time-series analytics (coming in Phase 4)
 source=metrics
 | where timestamp > now() - 1h
 | stats avg(cpu_usage), max(memory_usage) by host, span(1m)
@@ -471,9 +472,9 @@ source=metrics
 | sort -avg(cpu_usage)
 ```
 
-**Benefits**:
+**Benefits** (when implemented):
 - SQL-like syntax (90% OpenSearch PPL compatible)
-- Calcite-optimized execution
+- Query planner-optimized execution
 - Skip indexes for fast granule pruning
 
 ---
@@ -582,7 +583,7 @@ curl -X POST "http://localhost:9200/my-index/_search?pipeline=my-pipeline" \
 | **Storage** | Baseline | 40-70% smaller (compression) |
 | **Columnar Storage** | ❌ Limited | ✅ Native (ClickHouse-style) |
 | **Python Pipelines** | ❌ No | ✅ Native (embedded CPython) |
-| **Query Optimizer** | Rule-based | Calcite (cost-based) |
+| **Query Optimizer** | Rule-based | Custom Go planner (cost-based) |
 | **Node Specialization** | Generic | Inverted, Forward, Computation |
 | **SIMD Acceleration** | ❌ No | ✅ AVX2/NEON |
 | **Cloud-Native** | Helm charts | K8S operator |
@@ -623,14 +624,18 @@ curl -X POST "http://localhost:9200/my-index/_search?pipeline=my-pipeline" \
 - Complete Diagon core essentials
 - SIMD, compression, advanced queries
 
-### Phase 1: Distributed (Months 3-5) 🔄
-- Master + data nodes
-- Basic CRUD operations
-- Shard allocation
+### Phase 1: Distributed (Months 3-5) ✅ **99% COMPLETE**
+- ✅ Master node with Raft consensus
+- ✅ Data node with Diagon C++ engine (5,000 lines)
+- ✅ Coordination node with REST API
+- ✅ All nodes start and communicate
+- ⏳ Shard allocation integration (7 hours remaining)
+- **Status**: All code complete, needs integration glue (see [E2E_TEST_RESULTS.md](E2E_TEST_RESULTS.md))
 
 ### Phase 2: Query Planning (Months 6-8) ⏳
 - OpenSearch DSL support
-- Calcite integration
+- Custom Go query planner (learning from Calcite principles)
+- Expression Trees + WASM UDF framework
 - Query optimization
 
 ### Phase 3: Python Integration (Months 9-10) ⏳
@@ -708,7 +713,7 @@ ls -la *.md
 | **Master Nodes** | Go | Distributed systems, Raft consensus |
 | **Coordination Nodes** | Go + Python | Orchestration (Go), Pipelines (Python) |
 | **Data Nodes** | C++ (Diagon) | Performance, SIMD, existing codebase |
-| **Query Planner** | Java (Calcite) | Mature query optimizer |
+| **Query Planner** | Go | Custom planner learning from Calcite principles |
 | **Pipelines** | Python | ML/NLP ecosystem |
 | **Orchestration** | Kubernetes | Cloud-native, auto-scaling |
 | **Storage** | S3/MinIO/Ceph | Object storage for cold tier |
@@ -730,7 +735,7 @@ Quidditch is built upon the foundational work of:
 - **[Apache Lucene](https://lucene.apache.org/)** - Inverted index design
 - **[ClickHouse](https://clickhouse.com/)** - Columnar storage architecture
 - **[OpenSearch](https://opensearch.org/)** - API specification
-- **[Apache Calcite](https://calcite.apache.org/)** - Query optimization
+- **[Apache Calcite](https://calcite.apache.org/)** - Query optimizer design principles
 - **[Diagon Project](https://github.com/model-collapse/diagon)** - High-performance search engine core
 
 ---

@@ -1,7 +1,9 @@
 package wasm
 
 import (
+	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/tetratelabs/wazero/api"
 )
@@ -17,6 +19,57 @@ const (
 	ValueTypeString
 	ValueTypeBool
 )
+
+// String returns the string representation of ValueType
+func (vt ValueType) String() string {
+	switch vt {
+	case ValueTypeI32:
+		return "i32"
+	case ValueTypeI64:
+		return "i64"
+	case ValueTypeF32:
+		return "f32"
+	case ValueTypeF64:
+		return "f64"
+	case ValueTypeString:
+		return "string"
+	case ValueTypeBool:
+		return "bool"
+	default:
+		return fmt.Sprintf("unknown(%d)", vt)
+	}
+}
+
+// MarshalJSON implements json.Marshaler
+func (vt ValueType) MarshalJSON() ([]byte, error) {
+	return json.Marshal(vt.String())
+}
+
+// UnmarshalJSON implements json.Unmarshaler
+func (vt *ValueType) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+
+	switch strings.ToLower(s) {
+	case "i32":
+		*vt = ValueTypeI32
+	case "i64":
+		*vt = ValueTypeI64
+	case "f32":
+		*vt = ValueTypeF32
+	case "f64":
+		*vt = ValueTypeF64
+	case "string":
+		*vt = ValueTypeString
+	case "bool":
+		*vt = ValueTypeBool
+	default:
+		return fmt.Errorf("unknown value type: %s", s)
+	}
+	return nil
+}
 
 // Value represents a typed value that can be passed to/from WASM
 type Value struct {

@@ -19,6 +19,7 @@ import (
 	"github.com/quidditch/quidditch/pkg/coordination/parser"
 	"github.com/quidditch/quidditch/pkg/coordination/planner"
 	"github.com/quidditch/quidditch/pkg/coordination/router"
+	"github.com/quidditch/quidditch/pkg/wasm"
 	"go.uber.org/zap"
 )
 
@@ -31,11 +32,16 @@ type CoordinationNode struct {
 	masterClient  *MasterClient
 	queryExecutor *executor.QueryExecutor
 	queryPlanner  *planner.QueryPlanner
+	queryService  *QueryService // New: Complete planner pipeline
 	docRouter     *router.DocumentRouter
 	queryParser   *parser.QueryParser
 	metrics       *metrics.MetricsCollector
 	dataClients   map[string]*DataNodeClient
 	dataClientsMu sync.RWMutex
+
+	// UDF Management
+	udfRuntime  *wasm.Runtime
+	udfRegistry *wasm.UDFRegistry
 }
 
 // NewCoordinationNode creates a new coordination node
@@ -66,10 +72,44 @@ func NewCoordinationNode(cfg *config.CoordinationConfig, logger *zap.Logger) (*C
 	// Create query planner
 	queryPlanner := planner.NewQueryPlanner(masterClient, logger)
 
+	// Create query service with complete planner pipeline
+	queryService := NewQueryService(queryExecutor, masterClient, logger)
+
 	// Create document router
 	// We'll convert dataClients to the interface type needed by router
 	dataClientInterfaces := make(map[string]router.DataNodeClient)
 	docRouter := router.NewDocumentRouter(masterClient, dataClientInterfaces, logger)
+
+	// Initialize WASM runtime and UDF registry
+	wasmConfig := &wasm.Config{
+		EnableJIT:      true,
+		EnableDebug:    false,
+		MaxMemoryPages: 256, // 16MB
+		Logger:         logger,
+	}
+	wasmRuntime, err := wasm.NewRuntime(wasmConfig)
+	if err != nil {
+		logger.Warn("Failed to create WASM runtime, UDF support disabled", zap.Error(err))
+		// Continue without UDF support - not a fatal error
+		wasmRuntime = nil
+	}
+
+	var udfRegistry *wasm.UDFRegistry
+	if wasmRuntime != nil {
+		registryConfig := &wasm.UDFRegistryConfig{
+			Runtime:         wasmRuntime,
+			DefaultPoolSize: 10,
+			EnableStats:     true,
+			Logger:          logger,
+		}
+		udfRegistry, err = wasm.NewUDFRegistry(registryConfig)
+		if err != nil {
+			logger.Warn("Failed to create UDF registry", zap.Error(err))
+			udfRegistry = nil
+		} else {
+			logger.Info("WASM runtime and UDF registry initialized successfully")
+		}
+	}
 
 	node := &CoordinationNode{
 		cfg:           cfg,
@@ -78,10 +118,13 @@ func NewCoordinationNode(cfg *config.CoordinationConfig, logger *zap.Logger) (*C
 		masterClient:  masterClient,
 		queryExecutor: queryExecutor,
 		queryPlanner:  queryPlanner,
+		queryService:  queryService,
 		docRouter:     docRouter,
 		queryParser:   parser.NewQueryParser(),
 		metrics:       metricsCollector,
 		dataClients:   dataClients,
+		udfRuntime:    wasmRuntime,
+		udfRegistry:   udfRegistry,
 	}
 
 	// Set up routes
@@ -136,6 +179,13 @@ func (c *CoordinationNode) Stop(ctx context.Context) error {
 	if c.httpServer != nil {
 		if err := c.httpServer.Shutdown(ctx); err != nil {
 			c.logger.Error("Failed to shutdown HTTP server", zap.Error(err))
+		}
+	}
+
+	// Close WASM runtime
+	if c.udfRuntime != nil {
+		if err := c.udfRuntime.Close(); err != nil {
+			c.logger.Warn("Failed to close WASM runtime", zap.Error(err))
 		}
 	}
 
@@ -202,7 +252,9 @@ func (c *CoordinationNode) setupRoutes() {
 	c.ginRouter.PUT("/:index/_settings", c.handlePutSettings)
 
 	// Document APIs
+	c.logger.Info("Registering document routes")
 	c.ginRouter.PUT("/:index/_doc/:id", c.handleIndexDocument)
+	c.logger.Info("Registered PUT /:index/_doc/:id route")
 	c.ginRouter.POST("/:index/_doc", c.handleIndexDocument)
 	c.ginRouter.GET("/:index/_doc/:id", c.handleGetDocument)
 	c.ginRouter.DELETE("/:index/_doc/:id", c.handleDeleteDocument)
@@ -229,6 +281,13 @@ func (c *CoordinationNode) setupRoutes() {
 	// Nodes API
 	c.ginRouter.GET("/_nodes", c.handleNodes)
 	c.ginRouter.GET("/_nodes/stats", c.handleNodesStats)
+
+	// UDF Management APIs
+	if c.udfRegistry != nil {
+		udfHandlers := NewUDFHandlers(c.udfRegistry, c.logger)
+		api := c.ginRouter.Group("/api/v1")
+		udfHandlers.RegisterRoutes(api)
+	}
 
 	// Metrics endpoint (Prometheus)
 	c.ginRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
@@ -549,8 +608,14 @@ func (c *CoordinationNode) handlePutSettings(ctx *gin.Context) {
 }
 
 func (c *CoordinationNode) handleIndexDocument(ctx *gin.Context) {
+	c.logger.Info("==> handleIndexDocument ENTRY POINT")
 	indexName := ctx.Param("index")
 	docID := ctx.Param("id")
+
+	c.logger.Info("handleIndexDocument called",
+		zap.String("index", indexName),
+		zap.String("doc_id", docID),
+		zap.Bool("docRouter_is_nil", c.docRouter == nil))
 
 	// Parse document from request body
 	var document map[string]interface{}
@@ -563,6 +628,10 @@ func (c *CoordinationNode) handleIndexDocument(ctx *gin.Context) {
 		})
 		return
 	}
+
+	c.logger.Debug("About to call RouteIndexDocument",
+		zap.String("index", indexName),
+		zap.String("doc_id", docID))
 
 	// Route to appropriate data node
 	resp, err := c.docRouter.RouteIndexDocument(ctx.Request.Context(), indexName, docID, document)
@@ -944,6 +1013,11 @@ func (c *CoordinationNode) handleSearch(ctx *gin.Context) {
 	startTime := time.Now()
 	indexName := ctx.Param("index")
 
+	// If no index specified, use _all
+	if indexName == "" {
+		indexName = "_all"
+	}
+
 	// Read request body
 	body, err := io.ReadAll(ctx.Request.Body)
 	if err != nil {
@@ -956,101 +1030,51 @@ func (c *CoordinationNode) handleSearch(ctx *gin.Context) {
 		return
 	}
 
-	// Parse search request
-	var searchReq *parser.SearchRequest
-	if len(body) > 0 {
-		searchReq, err = c.queryParser.ParseSearchRequest(body)
-		if err != nil {
-			c.logger.Error("Failed to parse query", zap.Error(err))
-			ctx.JSON(http.StatusBadRequest, gin.H{
-				"error": gin.H{
-					"type":   "parsing_exception",
-					"reason": fmt.Sprintf("Failed to parse query: %v", err),
-				},
-			})
-			return
-		}
-
-		// Validate the parsed query
-		if searchReq.ParsedQuery != nil {
-			if err := c.queryParser.Validate(searchReq.ParsedQuery); err != nil {
-				c.logger.Error("Query validation failed", zap.Error(err))
-				ctx.JSON(http.StatusBadRequest, gin.H{
-					"error": gin.H{
-						"type":   "validation_exception",
-						"reason": fmt.Sprintf("Query validation failed: %v", err),
-					},
-				})
-				return
-			}
-		}
-	} else {
-		// Empty body - match all query
-		searchReq = &parser.SearchRequest{
-			ParsedQuery: &parser.MatchAllQuery{},
-		}
-	}
-
-	// Create query plan
-	plan, err := c.queryPlanner.PlanQuery(ctx.Request.Context(), indexName, searchReq)
+	// Execute search using the complete planner pipeline
+	result, err := c.queryService.ExecuteSearch(ctx.Request.Context(), indexName, body)
 	if err != nil {
-		c.logger.Error("Query planning failed",
+		// Determine error type
+		errorType := "search_exception"
+		statusCode := http.StatusInternalServerError
+
+		// Check if it's a parsing/validation error
+		if strings.Contains(err.Error(), "parse") || strings.Contains(err.Error(), "validation") {
+			errorType = "parsing_exception"
+			statusCode = http.StatusBadRequest
+		}
+
+		c.logger.Error("Search failed",
 			zap.String("index", indexName),
 			zap.Error(err))
-		// Continue without plan - planning is optional
-	} else {
-		// Log plan details
-		c.logger.Debug("Query plan created",
-			zap.String("index", indexName),
-			zap.Int("complexity", plan.Complexity),
-			zap.Float64("estimated_cost", plan.EstimatedCost),
-			zap.Int("target_shards", len(plan.TargetShards)),
-			zap.Bool("cacheable", plan.Cacheable))
-	}
 
-	// Log query info
-	c.logger.Debug("Processing search request",
-		zap.String("index", indexName),
-		zap.String("query_type", searchReq.ParsedQuery.QueryType()),
-		zap.Int("size", searchReq.Size),
-		zap.Int("from", searchReq.From))
-
-	// Extract filter expression from query if present
-	filterExpression := extractFilterExpression(searchReq.ParsedQuery)
-
-	// Execute query across shards
-	// TODO: Serialize parsed query properly - for now using original body
-	result, err := c.queryExecutor.ExecuteSearch(ctx.Request.Context(), indexName, body, filterExpression, searchReq.From, searchReq.Size)
-	if err != nil {
-		// Record failed query metrics
-		complexity := 0
-		if plan != nil {
-			complexity = plan.Complexity
-		}
-		c.metrics.RecordQuery(indexName, searchReq.ParsedQuery.QueryType(), "error", time.Since(startTime), complexity, 0)
-
-		c.logger.Error("Query execution failed",
-			zap.String("index", indexName),
-			zap.Error(err))
-		ctx.JSON(http.StatusInternalServerError, gin.H{
+		ctx.JSON(statusCode, gin.H{
 			"error": gin.H{
-				"type":   "search_exception",
-				"reason": fmt.Sprintf("Query execution failed: %v", err),
+				"type":   errorType,
+				"reason": err.Error(),
 			},
 		})
 		return
 	}
 
-	// Record successful query metrics
-	complexity := 0
-	shardCount := 0
-	if plan != nil {
-		complexity = plan.Complexity
-		shardCount = len(plan.TargetShards)
-	}
-	c.metrics.RecordQuery(indexName, searchReq.ParsedQuery.QueryType(), "success", time.Since(startTime), complexity, shardCount)
+	// Convert result to OpenSearch/Elasticsearch format
+	response := c.convertSearchResultToResponse(result)
 
-	// Convert result to OpenSearch format
+	// Record metrics
+	c.metrics.RecordQuery(
+		indexName,
+		"search", // Generic type for now
+		"success",
+		time.Since(startTime),
+		0, // Complexity not tracked here
+		result.Shards.Total,
+	)
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+// convertSearchResultToResponse converts SearchResult to OpenSearch/Elasticsearch response format
+func (c *CoordinationNode) convertSearchResultToResponse(result *SearchResult) gin.H {
+	// Convert hits
 	hits := make([]gin.H, 0, len(result.Hits))
 	for _, hit := range result.Hits {
 		hits = append(hits, gin.H{
@@ -1060,10 +1084,15 @@ func (c *CoordinationNode) handleSearch(ctx *gin.Context) {
 		})
 	}
 
-	ctx.JSON(http.StatusOK, gin.H{
+	response := gin.H{
 		"took":      result.TookMillis,
 		"timed_out": false,
-		"_shards":   gin.H{"total": 1, "successful": 1, "skipped": 0, "failed": 0},
+		"_shards": gin.H{
+			"total":      result.Shards.Total,
+			"successful": result.Shards.Successful,
+			"skipped":    result.Shards.Skipped,
+			"failed":     result.Shards.Failed,
+		},
 		"hits": gin.H{
 			"total": gin.H{
 				"value":    result.TotalHits,
@@ -1072,7 +1101,63 @@ func (c *CoordinationNode) handleSearch(ctx *gin.Context) {
 			"max_score": result.MaxScore,
 			"hits":      hits,
 		},
-	})
+	}
+
+	// Add aggregations if present
+	if len(result.Aggregations) > 0 {
+		aggregations := make(gin.H)
+		for name, agg := range result.Aggregations {
+			aggregations[name] = c.convertAggregationToResponse(agg)
+		}
+		response["aggregations"] = aggregations
+	}
+
+	return response
+}
+
+// convertAggregationToResponse converts AggregationResult to response format
+func (c *CoordinationNode) convertAggregationToResponse(agg *AggregationResult) gin.H {
+	result := gin.H{}
+
+	switch agg.Type {
+	case "terms", "histogram", "date_histogram":
+		// Bucket aggregations
+		buckets := make([]gin.H, 0, len(agg.Buckets))
+		for _, bucket := range agg.Buckets {
+			bucketData := gin.H{
+				"key":       bucket.Key,
+				"doc_count": bucket.DocCount,
+			}
+
+			// Add sub-aggregations if present
+			if len(bucket.SubAggs) > 0 {
+				for subName, subAgg := range bucket.SubAggs {
+					bucketData[subName] = c.convertAggregationToResponse(subAgg)
+				}
+			}
+
+			buckets = append(buckets, bucketData)
+		}
+		result["buckets"] = buckets
+
+	case "stats", "extended_stats":
+		// Stats aggregations
+		result["count"] = agg.Count
+		result["min"] = agg.Min
+		result["max"] = agg.Max
+		result["avg"] = agg.Avg
+		result["sum"] = agg.Sum
+
+	case "sum", "avg", "min", "max", "cardinality":
+		// Single-value aggregations
+		result["value"] = agg.Value
+
+	default:
+		// Unknown aggregation type - return as-is
+		result["value"] = agg.Value
+	}
+
+	return result
 }
 
 func (c *CoordinationNode) handleMultiSearch(ctx *gin.Context) {

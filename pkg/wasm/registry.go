@@ -295,6 +295,40 @@ func (r *UDFRegistry) Call(ctx context.Context, name, version string, docCtx *Do
 		return nil, fmt.Errorf("parameter validation failed: %w", err)
 	}
 
+	// Register parameters for host function access
+	paramMap := make(map[string]interface{})
+	for name, val := range params {
+		// Convert Value to native Go type
+		switch val.Type {
+		case ValueTypeI32:
+			if v, err := val.AsInt32(); err == nil {
+				paramMap[name] = v
+			}
+		case ValueTypeI64:
+			if v, err := val.AsInt64(); err == nil {
+				paramMap[name] = v
+			}
+		case ValueTypeF32:
+			if v, err := val.AsFloat32(); err == nil {
+				paramMap[name] = v
+			}
+		case ValueTypeF64:
+			if v, err := val.AsFloat64(); err == nil {
+				paramMap[name] = v
+			}
+		case ValueTypeString:
+			if v, err := val.AsString(); err == nil {
+				paramMap[name] = v
+			}
+		case ValueTypeBool:
+			if v, err := val.AsBool(); err == nil {
+				paramMap[name] = v
+			}
+		}
+	}
+	r.hostFuncs.RegisterParameters(paramMap)
+	defer r.hostFuncs.UnregisterParameters()
+
 	// Convert parameters to uint64 array
 	wasmParams, err := r.prepareParameters(registered.Metadata, params, ctxID)
 	if err != nil {

@@ -133,13 +133,25 @@ func (qe *QueryExecutor) HasDataNodeClient(nodeID string) bool {
 func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, query []byte, filterExpression []byte, from, size int) (*SearchResult, error) {
 	startTime := time.Now()
 
+	qe.logger.Info("==> ExecuteSearch ENTRY",
+		zap.String("index", indexName),
+		zap.Int("from", from),
+		zap.Int("size", size),
+		zap.String("query", string(query)))
+
 	// Get shard routing from master
 	routing, err := qe.masterClient.GetShardRouting(ctx, indexName)
 	if err != nil {
+		qe.logger.Error("Failed to get shard routing", zap.Error(err))
 		return nil, fmt.Errorf("failed to get shard routing: %w", err)
 	}
 
+	qe.logger.Info("Got shard routing",
+		zap.String("index", indexName),
+		zap.Int("num_shards", len(routing)))
+
 	if len(routing) == 0 {
+		qe.logger.Warn("No shards found for index", zap.String("index", indexName))
 		return &SearchResult{
 			TookMillis: time.Since(startTime).Milliseconds(),
 			TotalHits:  0,
@@ -159,11 +171,17 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 	var wg sync.WaitGroup
 
 	for shardID, shard := range routing {
+		qe.logger.Info("Processing shard",
+			zap.String("index", indexName),
+			zap.Int32("shard_id", shardID),
+			zap.Bool("has_allocation", shard.Allocation != nil))
+
 		// Only query primary or started replicas
 		if shard.Allocation == nil || shard.Allocation.State != pb.ShardAllocation_SHARD_STATE_STARTED {
-			qe.logger.Debug("Skipping shard - not started",
+			qe.logger.Warn("Skipping shard - not started",
 				zap.String("index", indexName),
-				zap.Int32("shard_id", shardID))
+				zap.Int32("shard_id", shardID),
+				zap.String("state", shard.Allocation.State.String()))
 			continue
 		}
 
@@ -174,6 +192,11 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 				zap.Int32("shard_id", shardID))
 			continue
 		}
+
+		qe.logger.Info("Querying shard",
+			zap.String("index", indexName),
+			zap.Int32("shard_id", shardID),
+			zap.String("node_id", nodeID))
 
 		wg.Add(1)
 		go func(sid int32, nid string) {
@@ -232,7 +255,35 @@ func (qe *QueryExecutor) ExecuteSearch(ctx context.Context, indexName string, qu
 			}
 
 			// Execute search on shard
+			qe.logger.Info("DEBUG: About to call client.Search",
+				zap.Int32("shard_id", sid),
+				zap.String("node_id", nid),
+				zap.String("index", indexName),
+				zap.String("query", string(query)))
+
 			resp, err := client.Search(ctx, indexName, sid, query, filterExpression)
+
+			qe.logger.Info("DEBUG: client.Search returned",
+				zap.Int32("shard_id", sid),
+				zap.String("node_id", nid),
+				zap.Bool("has_response", resp != nil),
+				zap.Bool("has_error", err != nil))
+
+			if resp != nil {
+				var totalHits int64
+				var hitsCount int
+				if resp.Hits != nil {
+					if resp.Hits.Total != nil {
+						totalHits = resp.Hits.Total.Value
+					}
+					hitsCount = len(resp.Hits.Hits)
+				}
+				qe.logger.Info("DEBUG: Search response details",
+					zap.Int32("shard_id", sid),
+					zap.Int64("total_hits", totalHits),
+					zap.Int("hits_count", hitsCount))
+			}
+
 			if err != nil {
 				shardQueryFailures.WithLabelValues(
 					indexName,

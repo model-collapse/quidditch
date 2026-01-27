@@ -2,7 +2,9 @@ package wasm
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"sync"
 	"unsafe"
 
@@ -18,15 +20,20 @@ type HostFunctions struct {
 	nextID   uint64
 	runtime  *Runtime
 	mu       sync.RWMutex // Protects contexts and nextID
+
+	// Parameter storage for UDF execution
+	currentParams map[string]interface{} // Store current query parameters
+	paramMutex    sync.RWMutex           // Protect parameter access
 }
 
 // NewHostFunctions creates a new host functions manager
 func NewHostFunctions(runtime *Runtime) *HostFunctions {
 	return &HostFunctions{
-		logger:   runtime.logger.With(zap.String("component", "host_functions")),
-		contexts: make(map[uint64]*DocumentContext),
-		nextID:   1,
-		runtime:  runtime,
+		logger:        runtime.logger.With(zap.String("component", "host_functions")),
+		contexts:      make(map[uint64]*DocumentContext),
+		nextID:        1,
+		runtime:       runtime,
+		currentParams: make(map[string]interface{}),
 	}
 }
 
@@ -53,6 +60,31 @@ func (hf *HostFunctions) GetContext(id uint64) (*DocumentContext, bool) {
 	defer hf.mu.RUnlock()
 	ctx, exists := hf.contexts[id]
 	return ctx, exists
+}
+
+// RegisterParameters stores parameters for the current UDF execution
+func (hf *HostFunctions) RegisterParameters(params map[string]interface{}) {
+	hf.paramMutex.Lock()
+	defer hf.paramMutex.Unlock()
+	hf.currentParams = params
+}
+
+// UnregisterParameters clears stored parameters after execution
+func (hf *HostFunctions) UnregisterParameters() {
+	hf.paramMutex.Lock()
+	defer hf.paramMutex.Unlock()
+	hf.currentParams = nil
+}
+
+// GetParameter retrieves a parameter by name (thread-safe)
+func (hf *HostFunctions) GetParameter(name string) (interface{}, bool) {
+	hf.paramMutex.RLock()
+	defer hf.paramMutex.RUnlock()
+	if hf.currentParams == nil {
+		return nil, false
+	}
+	val, ok := hf.currentParams[name]
+	return val, ok
 }
 
 // RegisterHostFunctions registers all host functions with the WASM runtime
@@ -126,6 +158,48 @@ func (hf *HostFunctions) RegisterHostFunctions(ctx context.Context, runtime waze
 			api.ValueTypeI32, // msg_len
 		}, []api.ValueType{}).
 		Export("log")
+
+	// Register parameter access functions
+	// get_param_string(name_ptr: i32, name_len: i32, value_ptr: i32, value_len_ptr: i32) -> i32
+	// Returns: 0=success, 1=not found, 2=not a string, 3=buffer too small
+	hostBuilder.NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(hf.getParamString), []api.ValueType{
+			api.ValueTypeI32, // name_ptr
+			api.ValueTypeI32, // name_len
+			api.ValueTypeI32, // value_ptr
+			api.ValueTypeI32, // value_len_ptr
+		}, []api.ValueType{api.ValueTypeI32}).
+		Export("get_param_string")
+
+	// get_param_i64(name_ptr: i32, name_len: i32, out_ptr: i32) -> i32
+	// Returns: 0=success, 1=not found, 2=not numeric, 3=write error
+	hostBuilder.NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(hf.getParamInt64), []api.ValueType{
+			api.ValueTypeI32, // name_ptr
+			api.ValueTypeI32, // name_len
+			api.ValueTypeI32, // out_ptr
+		}, []api.ValueType{api.ValueTypeI32}).
+		Export("get_param_i64")
+
+	// get_param_f64(name_ptr: i32, name_len: i32, out_ptr: i32) -> i32
+	// Returns: 0=success, 1=not found, 2=not numeric, 3=write error
+	hostBuilder.NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(hf.getParamFloat64), []api.ValueType{
+			api.ValueTypeI32, // name_ptr
+			api.ValueTypeI32, // name_len
+			api.ValueTypeI32, // out_ptr
+		}, []api.ValueType{api.ValueTypeI32}).
+		Export("get_param_f64")
+
+	// get_param_bool(name_ptr: i32, name_len: i32, out_ptr: i32) -> i32
+	// Returns: 0=success, 1=not found, 2=not a bool, 3=write error
+	hostBuilder.NewFunctionBuilder().
+		WithGoModuleFunction(api.GoModuleFunc(hf.getParamBool), []api.ValueType{
+			api.ValueTypeI32, // name_ptr
+			api.ValueTypeI32, // name_len
+			api.ValueTypeI32, // out_ptr
+		}, []api.ValueType{api.ValueTypeI32}).
+		Export("get_param_bool")
 
 	// Instantiate the host module
 	if _, err := hostBuilder.Instantiate(ctx); err != nil {
@@ -385,6 +459,226 @@ func (hf *HostFunctions) log(ctx context.Context, mod api.Module, stack []uint64
 	}
 
 	hf.logger.Debug("WASM log", zap.String("message", string(msgBytes)))
+}
+
+// getParamString retrieves a string parameter from the current UDF execution
+// Parameters: name_ptr, name_len, value_ptr, value_len_ptr
+// Returns: 0=success, 1=not found, 2=not a string, 3=buffer too small
+func (hf *HostFunctions) getParamString(ctx context.Context, mod api.Module, stack []uint64) {
+	namePtr := uint32(stack[0])
+	nameLen := uint32(stack[1])
+	valuePtr := uint32(stack[2])
+	valueLenPtr := uint32(stack[3])
+
+	// Read parameter name from WASM memory
+	nameBytes, ok := mod.Memory().Read(namePtr, nameLen)
+	if !ok {
+		hf.logger.Error("Failed to read parameter name from memory")
+		stack[0] = 1 // Parameter not found
+		return
+	}
+	paramName := string(nameBytes)
+
+	// Look up parameter
+	paramValue, exists := hf.GetParameter(paramName)
+	if !exists {
+		hf.logger.Debug("Parameter not found", zap.String("name", paramName))
+		stack[0] = 1 // Parameter not found
+		return
+	}
+
+	// Check if parameter is a string
+	strValue, ok := paramValue.(string)
+	if !ok {
+		hf.logger.Warn("Parameter is not a string",
+			zap.String("name", paramName),
+			zap.String("type", fmt.Sprintf("%T", paramValue)))
+		stack[0] = 2 // Not a string
+		return
+	}
+
+	// Read buffer size from WASM memory
+	valueLenBytes, ok := mod.Memory().Read(valueLenPtr, 4)
+	if !ok {
+		stack[0] = 3 // Buffer error
+		return
+	}
+	bufferSize := binary.LittleEndian.Uint32(valueLenBytes)
+
+	// Check if buffer is large enough
+	valueBytes := []byte(strValue)
+	if uint32(len(valueBytes)) > bufferSize {
+		// Write required size
+		binary.LittleEndian.PutUint32(valueLenBytes, uint32(len(valueBytes)))
+		mod.Memory().Write(valueLenPtr, valueLenBytes)
+		stack[0] = 3 // Buffer too small
+		return
+	}
+
+	// Write string value to WASM memory
+	if !mod.Memory().Write(valuePtr, valueBytes) {
+		stack[0] = 3 // Write error
+		return
+	}
+
+	// Write actual length
+	binary.LittleEndian.PutUint32(valueLenBytes, uint32(len(valueBytes)))
+	mod.Memory().Write(valueLenPtr, valueLenBytes)
+
+	stack[0] = 0 // Success
+}
+
+// getParamInt64 retrieves an int64 parameter from the current UDF execution
+// Parameters: name_ptr, name_len, out_ptr
+// Returns: 0=success, 1=not found, 2=not numeric, 3=write error
+func (hf *HostFunctions) getParamInt64(ctx context.Context, mod api.Module, stack []uint64) {
+	namePtr := uint32(stack[0])
+	nameLen := uint32(stack[1])
+	outPtr := uint32(stack[2])
+
+	// Read parameter name
+	nameBytes, ok := mod.Memory().Read(namePtr, nameLen)
+	if !ok {
+		stack[0] = 1
+		return
+	}
+	paramName := string(nameBytes)
+
+	// Look up parameter
+	paramValue, exists := hf.GetParameter(paramName)
+	if !exists {
+		stack[0] = 1
+		return
+	}
+
+	// Convert to int64 (handle multiple numeric types)
+	var i64Value int64
+	switch v := paramValue.(type) {
+	case int64:
+		i64Value = v
+	case int32:
+		i64Value = int64(v)
+	case int:
+		i64Value = int64(v)
+	case float64:
+		i64Value = int64(v)
+	case float32:
+		i64Value = int64(v)
+	default:
+		hf.logger.Warn("Parameter is not numeric",
+			zap.String("name", paramName),
+			zap.String("type", fmt.Sprintf("%T", paramValue)))
+		stack[0] = 2
+		return
+	}
+
+	// Write to WASM memory
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, uint64(i64Value))
+	if !mod.Memory().Write(outPtr, buf) {
+		stack[0] = 3
+		return
+	}
+
+	stack[0] = 0 // Success
+}
+
+// getParamFloat64 retrieves a float64 parameter from the current UDF execution
+// Parameters: name_ptr, name_len, out_ptr
+// Returns: 0=success, 1=not found, 2=not numeric, 3=write error
+func (hf *HostFunctions) getParamFloat64(ctx context.Context, mod api.Module, stack []uint64) {
+	namePtr := uint32(stack[0])
+	nameLen := uint32(stack[1])
+	outPtr := uint32(stack[2])
+
+	// Read parameter name
+	nameBytes, ok := mod.Memory().Read(namePtr, nameLen)
+	if !ok {
+		stack[0] = 1
+		return
+	}
+	paramName := string(nameBytes)
+
+	// Look up parameter
+	paramValue, exists := hf.GetParameter(paramName)
+	if !exists {
+		stack[0] = 1
+		return
+	}
+
+	// Convert to float64 (handle multiple numeric types)
+	var f64Value float64
+	switch v := paramValue.(type) {
+	case float64:
+		f64Value = v
+	case float32:
+		f64Value = float64(v)
+	case int64:
+		f64Value = float64(v)
+	case int32:
+		f64Value = float64(v)
+	case int:
+		f64Value = float64(v)
+	default:
+		stack[0] = 2
+		return
+	}
+
+	// Write to WASM memory
+	buf := make([]byte, 8)
+	binary.LittleEndian.PutUint64(buf, math.Float64bits(f64Value))
+	if !mod.Memory().Write(outPtr, buf) {
+		stack[0] = 3
+		return
+	}
+
+	stack[0] = 0 // Success
+}
+
+// getParamBool retrieves a bool parameter from the current UDF execution
+// Parameters: name_ptr, name_len, out_ptr
+// Returns: 0=success, 1=not found, 2=not a bool, 3=write error
+func (hf *HostFunctions) getParamBool(ctx context.Context, mod api.Module, stack []uint64) {
+	namePtr := uint32(stack[0])
+	nameLen := uint32(stack[1])
+	outPtr := uint32(stack[2])
+
+	// Read parameter name
+	nameBytes, ok := mod.Memory().Read(namePtr, nameLen)
+	if !ok {
+		stack[0] = 1
+		return
+	}
+	paramName := string(nameBytes)
+
+	// Look up parameter
+	paramValue, exists := hf.GetParameter(paramName)
+	if !exists {
+		stack[0] = 1
+		return
+	}
+
+	// Check if parameter is a bool
+	boolValue, ok := paramValue.(bool)
+	if !ok {
+		stack[0] = 2
+		return
+	}
+
+	// Write to WASM memory
+	var boolByte byte
+	if boolValue {
+		boolByte = 1
+	} else {
+		boolByte = 0
+	}
+
+	if !mod.Memory().Write(outPtr, []byte{boolByte}) {
+		stack[0] = 3
+		return
+	}
+
+	stack[0] = 0 // Success
 }
 
 // uint32ToBytes converts uint32 to byte slice
