@@ -25,6 +25,7 @@
 #include "diagon/search/BooleanClause.h"
 #include "diagon/search/TopDocs.h"
 
+#include <bit>
 #include <cstring>
 #include <memory>
 #include <string>
@@ -361,6 +362,8 @@ DiagonField diagon_create_indexed_long_field(const char* name, int64_t value) {
         fieldType.indexOptions = diagon::index::IndexOptions::DOCS;  // Index for searching
         fieldType.stored = true;  // Store for retrieval
         fieldType.tokenized = false;  // Don't tokenize numbers
+        fieldType.docValuesType = diagon::index::DocValuesType::NUMERIC;  // Enable doc values for range queries
+        fieldType.numericType = diagon::document::NumericType::LONG;  // Track as LONG type
 
         // Create field with numeric value
         auto field = std::make_unique<diagon::document::Field>(name, value, fieldType);
@@ -383,13 +386,15 @@ DiagonField diagon_create_indexed_double_field(const char* name, double value) {
         fieldType.indexOptions = diagon::index::IndexOptions::DOCS;  // Index for searching
         fieldType.stored = true;  // Store for retrieval
         fieldType.tokenized = false;  // Don't tokenize numbers
+        fieldType.docValuesType = diagon::index::DocValuesType::NUMERIC;  // Enable doc values for range queries
+        fieldType.numericType = diagon::document::NumericType::DOUBLE;  // Track as DOUBLE type
 
-        // Convert double to int64 for storage
-        // TODO: Proper double field support
-        int64_t intValue = static_cast<int64_t>(value);
+        // Convert double to int64_t using bit_cast to preserve full precision
+        // This stores the bit representation of the double in int64_t without loss
+        int64_t longBits = std::bit_cast<int64_t>(value);
 
-        // Create field with numeric value
-        auto field = std::make_unique<diagon::document::Field>(name, intValue, fieldType);
+        // Create field with numeric value (stored as bit representation)
+        auto field = std::make_unique<diagon::document::Field>(name, longBits, fieldType);
         return static_cast<DiagonField>(field.release());
     } catch (const std::exception& e) {
         set_error(e);
@@ -582,9 +587,14 @@ DiagonQuery diagon_create_numeric_range_query(
     }
 
     try {
-        // Convert double to int64_t for Diagon
-        int64_t lower = static_cast<int64_t>(lower_value);
-        int64_t upper = static_cast<int64_t>(upper_value);
+        // Convert double to int64_t using bit_cast to preserve full precision
+        // This allows the same function to work for both LONG and DOUBLE fields:
+        // - For LONG fields: Pass integers as doubles (e.g., 100.0), they'll be
+        //   converted and match int64_t comparisons
+        // - For DOUBLE fields: Pass doubles (e.g., 150.5), bit representation is
+        //   preserved and matches double comparisons
+        int64_t lower = std::bit_cast<int64_t>(lower_value);
+        int64_t upper = std::bit_cast<int64_t>(upper_value);
 
         auto query = std::make_unique<diagon::search::NumericRangeQuery>(
             std::string(field_name),

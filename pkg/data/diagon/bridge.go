@@ -486,15 +486,15 @@ func (s *Shard) convertQueryToDiagon(queryObj map[string]interface{}) (C.DiagonQ
 			cField := C.CString(field)
 			defer C.free(unsafe.Pointer(cField))
 
-			s.logger.Info("DEBUG: Creating Diagon double range query",
+			s.logger.Info("DEBUG: Creating Diagon numeric range query",
 				zap.String("field", field),
 				zap.Float64("lower", lowerValue),
 				zap.Float64("upper", upperValue),
 				zap.Bool("include_lower", includeLower),
 				zap.Bool("include_upper", includeUpper))
 
-			// Use double range query for proper double field support
-			diagonQuery = C.diagon_create_double_range_query(
+			// Use unified numeric range query (auto-detects LONG vs DOUBLE)
+			diagonQuery = C.diagon_create_numeric_range_query(
 				cField,
 				C.double(lowerValue),
 				C.double(upperValue),
@@ -504,10 +504,10 @@ func (s *Shard) convertQueryToDiagon(queryObj map[string]interface{}) (C.DiagonQ
 
 			if diagonQuery == nil {
 				errMsg := C.GoString(C.diagon_last_error())
-				s.logger.Error("DEBUG: Failed to create Diagon double range query", zap.String("error", errMsg))
-				return nil, fmt.Errorf("failed to create double range query: %s", errMsg)
+				s.logger.Error("DEBUG: Failed to create Diagon numeric range query", zap.String("error", errMsg))
+				return nil, fmt.Errorf("failed to create numeric range query: %s", errMsg)
 			}
-			s.logger.Info("DEBUG: Diagon double range query created successfully")
+			s.logger.Info("DEBUG: Diagon numeric range query created successfully")
 			break // Only support single field for now
 		}
 	} else if boolQuery, ok := queryObj["bool"].(map[string]interface{}); ok {
