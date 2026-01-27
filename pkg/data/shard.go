@@ -98,18 +98,20 @@ func (sm *ShardManager) CreateShard(ctx context.Context, indexName string, shard
 		return fmt.Errorf("failed to create Diagon shard: %w", err)
 	}
 
-	// Create shard wrapper
+	// Create shard wrapper with default analyzer settings
 	shard := &Shard{
-		IndexName:    indexName,
-		ShardID:      shardID,
-		IsPrimary:    isPrimary,
-		Path:         shardPath,
-		State:        ShardStateInitializing,
-		DiagonShard:  diagonShard,
-		udfFilter:    sm.udfFilter,
-		DocsCount:    0,
-		SizeBytes:    0,
-		logger:       sm.logger.With(zap.String("shard", key)),
+		IndexName:        indexName,
+		ShardID:          shardID,
+		IsPrimary:        isPrimary,
+		Path:             shardPath,
+		State:            ShardStateInitializing,
+		DiagonShard:      diagonShard,
+		udfFilter:        sm.udfFilter,
+		DocsCount:        0,
+		SizeBytes:        0,
+		logger:           sm.logger.With(zap.String("shard", key)),
+		analyzerSettings: DefaultAnalyzerSettings(), // Use default analyzer settings
+		analyzerCache:    NewAnalyzerCache(),        // Create analyzer cache
 	}
 
 	sm.shards[key] = shard
@@ -274,16 +276,18 @@ func (sm *ShardManager) loadShards() error {
 
 			// Create shard wrapper
 			shard := &Shard{
-				IndexName:   indexName,
-				ShardID:     int32(shardID),
-				IsPrimary:   false, // Will be set by master during registration
-				Path:        shardPath,
-				State:       ShardStateStarted,
-				DiagonShard: diagonShard,
-				udfFilter:   sm.udfFilter,
-				DocsCount:   0, // TODO: Could load actual count from Diagon
-				SizeBytes:   0, // TODO: Could calculate from disk
-				logger:      sm.logger.With(zap.String("shard", key)),
+				IndexName:        indexName,
+				ShardID:          int32(shardID),
+				IsPrimary:        false, // Will be set by master during registration
+				Path:             shardPath,
+				State:            ShardStateStarted,
+				DiagonShard:      diagonShard,
+				udfFilter:        sm.udfFilter,
+				DocsCount:        0, // TODO: Could load actual count from Diagon
+				SizeBytes:        0, // TODO: Could calculate from disk
+				logger:           sm.logger.With(zap.String("shard", key)),
+				analyzerSettings: DefaultAnalyzerSettings(), // Use default analyzer settings
+				analyzerCache:    NewAnalyzerCache(),        // Create analyzer cache
 			}
 
 			sm.mu.Lock()
@@ -311,17 +315,19 @@ func shardKey(indexName string, shardID int32) string {
 
 // Shard represents a single shard on a data node
 type Shard struct {
-	IndexName   string
-	ShardID     int32
-	IsPrimary   bool
-	Path        string
-	State       ShardState
-	DiagonShard *diagon.Shard
-	udfFilter   *UDFFilter
-	DocsCount   int64
-	SizeBytes   int64
-	logger      *zap.Logger
-	mu          sync.RWMutex
+	IndexName        string
+	ShardID          int32
+	IsPrimary        bool
+	Path             string
+	State            ShardState
+	DiagonShard      *diagon.Shard
+	udfFilter        *UDFFilter
+	DocsCount        int64
+	SizeBytes        int64
+	logger           *zap.Logger
+	mu               sync.RWMutex
+	analyzerSettings *AnalyzerSettings // Analyzer configuration for this shard
+	analyzerCache    *AnalyzerCache    // Cached analyzer instances
 }
 
 // ShardState represents the state of a shard
@@ -333,6 +339,32 @@ const (
 	ShardStateRelocating   ShardState = "relocating"
 	ShardStateClosed       ShardState = "closed"
 )
+
+// SetAnalyzerSettings updates the analyzer settings for this shard
+func (s *Shard) SetAnalyzerSettings(settings *AnalyzerSettings) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.analyzerSettings = settings
+}
+
+// GetAnalyzerSettings returns the current analyzer settings
+func (s *Shard) GetAnalyzerSettings() *AnalyzerSettings {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.analyzerSettings
+}
+
+// AnalyzeText analyzes text using the configured analyzer for a field
+func (s *Shard) AnalyzeText(fieldName, text string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.analyzerSettings == nil || s.analyzerCache == nil {
+		return nil, fmt.Errorf("analyzer settings not initialized")
+	}
+
+	return AnalyzeField(s.analyzerCache, s.analyzerSettings, fieldName, text)
+}
 
 // IndexDocument indexes a document in the shard
 func (s *Shard) IndexDocument(ctx context.Context, docID string, doc map[string]interface{}) error {
@@ -512,6 +544,11 @@ func (s *Shard) Close() error {
 	// Close Diagon shard
 	if err := s.DiagonShard.Close(); err != nil {
 		return fmt.Errorf("failed to close Diagon shard: %w", err)
+	}
+
+	// Close analyzer cache
+	if s.analyzerCache != nil {
+		s.analyzerCache.Close()
 	}
 
 	s.State = ShardStateClosed
