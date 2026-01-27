@@ -17,6 +17,7 @@ import (
 	"github.com/quidditch/quidditch/pkg/coordination/bulk"
 	"github.com/quidditch/quidditch/pkg/coordination/executor"
 	"github.com/quidditch/quidditch/pkg/coordination/parser"
+	"github.com/quidditch/quidditch/pkg/coordination/pipeline"
 	"github.com/quidditch/quidditch/pkg/coordination/planner"
 	"github.com/quidditch/quidditch/pkg/coordination/router"
 	"github.com/quidditch/quidditch/pkg/wasm"
@@ -42,6 +43,10 @@ type CoordinationNode struct {
 	// UDF Management
 	udfRuntime  *wasm.Runtime
 	udfRegistry *wasm.UDFRegistry
+
+	// Pipeline Management
+	pipelineRegistry *pipeline.Registry
+	pipelineExecutor *pipeline.Executor
 }
 
 // NewCoordinationNode creates a new coordination node
@@ -111,20 +116,27 @@ func NewCoordinationNode(cfg *config.CoordinationConfig, logger *zap.Logger) (*C
 		}
 	}
 
+	// Initialize Pipeline registry and executor
+	pipelineRegistry := pipeline.NewRegistry(logger)
+	pipelineExecutor := pipeline.NewExecutor(pipelineRegistry, logger)
+	logger.Info("Pipeline framework initialized successfully")
+
 	node := &CoordinationNode{
-		cfg:           cfg,
-		logger:        logger,
-		ginRouter:     ginRouter,
-		masterClient:  masterClient,
-		queryExecutor: queryExecutor,
-		queryPlanner:  queryPlanner,
-		queryService:  queryService,
-		docRouter:     docRouter,
-		queryParser:   parser.NewQueryParser(),
-		metrics:       metricsCollector,
-		dataClients:   dataClients,
-		udfRuntime:    wasmRuntime,
-		udfRegistry:   udfRegistry,
+		cfg:              cfg,
+		logger:           logger,
+		ginRouter:        ginRouter,
+		masterClient:     masterClient,
+		queryExecutor:    queryExecutor,
+		queryPlanner:     queryPlanner,
+		queryService:     queryService,
+		docRouter:        docRouter,
+		queryParser:      parser.NewQueryParser(),
+		metrics:          metricsCollector,
+		dataClients:      dataClients,
+		udfRuntime:       wasmRuntime,
+		udfRegistry:      udfRegistry,
+		pipelineRegistry: pipelineRegistry,
+		pipelineExecutor: pipelineExecutor,
 	}
 
 	// Set up routes
@@ -289,6 +301,13 @@ func (c *CoordinationNode) setupRoutes() {
 		udfHandlers.RegisterRoutes(api)
 	}
 
+	// Pipeline Management APIs
+	if c.pipelineRegistry != nil {
+		pipelineHandlers := NewPipelineHandlers(c.pipelineRegistry, c.pipelineExecutor, c.logger)
+		api := c.ginRouter.Group("/api/v1")
+		pipelineHandlers.RegisterRoutes(api)
+	}
+
 	// Metrics endpoint (Prometheus)
 	c.ginRouter.GET("/metrics", gin.WrapH(promhttp.Handler()))
 
@@ -447,6 +466,8 @@ func (c *CoordinationNode) handleCreateIndex(ctx *gin.Context) {
 	// Extract settings (with defaults)
 	numShards := int32(1)
 	numReplicas := int32(0)
+	var queryPipeline, documentPipeline, resultPipeline string
+
 	if settingsMap, ok := body["settings"].(map[string]interface{}); ok {
 		if indexSettings, ok := settingsMap["index"].(map[string]interface{}); ok {
 			if shards, ok := indexSettings["number_of_shards"].(float64); ok {
@@ -454,6 +475,23 @@ func (c *CoordinationNode) handleCreateIndex(ctx *gin.Context) {
 			}
 			if replicas, ok := indexSettings["number_of_replicas"].(float64); ok {
 				numReplicas = int32(replicas)
+			}
+
+			// Extract pipeline settings
+			if querySettings, ok := indexSettings["query"].(map[string]interface{}); ok {
+				if pipelineName, ok := querySettings["default_pipeline"].(string); ok {
+					queryPipeline = pipelineName
+				}
+			}
+			if documentSettings, ok := indexSettings["document"].(map[string]interface{}); ok {
+				if pipelineName, ok := documentSettings["default_pipeline"].(string); ok {
+					documentPipeline = pipelineName
+				}
+			}
+			if resultSettings, ok := indexSettings["result"].(map[string]interface{}); ok {
+				if pipelineName, ok := resultSettings["default_pipeline"].(string); ok {
+					resultPipeline = pipelineName
+				}
 			}
 		}
 	}
@@ -483,6 +521,44 @@ func (c *CoordinationNode) handleCreateIndex(ctx *gin.Context) {
 	c.logger.Info("Successfully created index",
 		zap.String("index", indexName),
 		zap.Bool("acknowledged", resp.Acknowledged))
+
+	// Associate pipelines with index
+	if queryPipeline != "" {
+		if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeQuery, queryPipeline); err != nil {
+			c.logger.Warn("Failed to associate query pipeline",
+				zap.String("index", indexName),
+				zap.String("pipeline", queryPipeline),
+				zap.Error(err))
+		} else {
+			c.logger.Info("Associated query pipeline with index",
+				zap.String("index", indexName),
+				zap.String("pipeline", queryPipeline))
+		}
+	}
+	if documentPipeline != "" {
+		if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeDocument, documentPipeline); err != nil {
+			c.logger.Warn("Failed to associate document pipeline",
+				zap.String("index", indexName),
+				zap.String("pipeline", documentPipeline),
+				zap.Error(err))
+		} else {
+			c.logger.Info("Associated document pipeline with index",
+				zap.String("index", indexName),
+				zap.String("pipeline", documentPipeline))
+		}
+	}
+	if resultPipeline != "" {
+		if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeResult, resultPipeline); err != nil {
+			c.logger.Warn("Failed to associate result pipeline",
+				zap.String("index", indexName),
+				zap.String("pipeline", resultPipeline),
+				zap.Error(err))
+		} else {
+			c.logger.Info("Associated result pipeline with index",
+				zap.String("index", indexName),
+				zap.String("pipeline", resultPipeline))
+		}
+	}
 
 	ctx.JSON(http.StatusOK, gin.H{
 		"acknowledged":        resp.Acknowledged,
@@ -591,19 +667,124 @@ func (c *CoordinationNode) handlePutMapping(ctx *gin.Context) {
 
 func (c *CoordinationNode) handleGetSettings(ctx *gin.Context) {
 	indexName := ctx.Param("index")
+
+	// Build index settings
+	indexSettings := gin.H{
+		"number_of_shards":   "1",
+		"number_of_replicas": "0",
+	}
+
+	// Add pipeline settings if pipelines are associated
+	if queryPipeline, err := c.pipelineRegistry.GetPipelineForIndex(indexName, pipeline.PipelineTypeQuery); err == nil {
+		indexSettings["query"] = gin.H{
+			"default_pipeline": queryPipeline.Name(),
+		}
+	}
+	if documentPipeline, err := c.pipelineRegistry.GetPipelineForIndex(indexName, pipeline.PipelineTypeDocument); err == nil {
+		indexSettings["document"] = gin.H{
+			"default_pipeline": documentPipeline.Name(),
+		}
+	}
+	if resultPipeline, err := c.pipelineRegistry.GetPipelineForIndex(indexName, pipeline.PipelineTypeResult); err == nil {
+		indexSettings["result"] = gin.H{
+			"default_pipeline": resultPipeline.Name(),
+		}
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{
 		indexName: gin.H{
 			"settings": gin.H{
-				"index": gin.H{
-					"number_of_shards":   "1",
-					"number_of_replicas": "0",
-				},
+				"index": indexSettings,
 			},
 		},
 	})
 }
 
 func (c *CoordinationNode) handlePutSettings(ctx *gin.Context) {
+	indexName := ctx.Param("index")
+
+	// Parse request body for settings
+	var body map[string]interface{}
+	if err := ctx.ShouldBindJSON(&body); err != nil {
+		c.logger.Error("Failed to parse request body", zap.Error(err))
+		ctx.JSON(http.StatusBadRequest, gin.H{
+			"error": gin.H{
+				"type":   "parsing_exception",
+				"reason": fmt.Sprintf("Failed to parse request body: %v", err),
+			},
+		})
+		return
+	}
+
+	// Extract pipeline settings
+	if settingsMap, ok := body["index"].(map[string]interface{}); ok {
+		// Update query pipeline
+		if querySettings, ok := settingsMap["query"].(map[string]interface{}); ok {
+			if pipelineName, ok := querySettings["default_pipeline"].(string); ok {
+				if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeQuery, pipelineName); err != nil {
+					c.logger.Error("Failed to associate query pipeline",
+						zap.String("index", indexName),
+						zap.String("pipeline", pipelineName),
+						zap.Error(err))
+					ctx.JSON(http.StatusBadRequest, gin.H{
+						"error": gin.H{
+							"type":   "pipeline_association_exception",
+							"reason": fmt.Sprintf("Failed to associate query pipeline: %v", err),
+						},
+					})
+					return
+				}
+				c.logger.Info("Updated query pipeline association",
+					zap.String("index", indexName),
+					zap.String("pipeline", pipelineName))
+			}
+		}
+
+		// Update document pipeline
+		if documentSettings, ok := settingsMap["document"].(map[string]interface{}); ok {
+			if pipelineName, ok := documentSettings["default_pipeline"].(string); ok {
+				if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeDocument, pipelineName); err != nil {
+					c.logger.Error("Failed to associate document pipeline",
+						zap.String("index", indexName),
+						zap.String("pipeline", pipelineName),
+						zap.Error(err))
+					ctx.JSON(http.StatusBadRequest, gin.H{
+						"error": gin.H{
+							"type":   "pipeline_association_exception",
+							"reason": fmt.Sprintf("Failed to associate document pipeline: %v", err),
+						},
+					})
+					return
+				}
+				c.logger.Info("Updated document pipeline association",
+					zap.String("index", indexName),
+					zap.String("pipeline", pipelineName))
+			}
+		}
+
+		// Update result pipeline
+		if resultSettings, ok := settingsMap["result"].(map[string]interface{}); ok {
+			if pipelineName, ok := resultSettings["default_pipeline"].(string); ok {
+				if err := c.pipelineRegistry.AssociatePipeline(indexName, pipeline.PipelineTypeResult, pipelineName); err != nil {
+					c.logger.Error("Failed to associate result pipeline",
+						zap.String("index", indexName),
+						zap.String("pipeline", pipelineName),
+						zap.Error(err))
+					ctx.JSON(http.StatusBadRequest, gin.H{
+						"error": gin.H{
+							"type":   "pipeline_association_exception",
+							"reason": fmt.Sprintf("Failed to associate result pipeline: %v", err),
+						},
+					})
+					return
+				}
+				c.logger.Info("Updated result pipeline association",
+					zap.String("index", indexName),
+					zap.String("pipeline", pipelineName))
+			}
+		}
+	}
+
 	ctx.JSON(http.StatusOK, gin.H{"acknowledged": true})
 }
 
