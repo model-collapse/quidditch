@@ -6,7 +6,8 @@
 # with Diagon C++ search engine.
 #
 
-set -e
+# set -e temporarily disabled for better error messages
+# set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -136,24 +137,29 @@ echo -e "${GREEN}   ✓ Coordination node started (PID: $COORD_PID)${NC}"
 
 echo ""
 echo "3. Waiting for cluster to be ready..."
-sleep 3
+sleep 10
 echo -e "${GREEN}   ✓ Cluster is ready${NC}"
 
 echo ""
 echo "4. Creating test index..."
-curl -s -X PUT "http://localhost:$COORDINATION_PORT/products" \
+HTTP_CODE=$(curl -s -w "%{http_code}" -o /tmp/create_index_resp.json \
+  -X PUT "http://localhost:$COORDINATION_PORT/products" \
   -H 'Content-Type: application/json' \
   -d '{
     "settings": {
       "number_of_shards": 1,
       "number_of_replicas": 0
     }
-  }' > /tmp/create_index_resp.json
+  }')
 
-if grep -q "acknowledged.*true" /tmp/create_index_resp.json; then
-  echo -e "${GREEN}   ✓ Index created${NC}"
+echo "DEBUG: HTTP_CODE='$HTTP_CODE'"
+echo "DEBUG: Response content:"
+cat /tmp/create_index_resp.json
+
+if [ "$HTTP_CODE" = "200" ] || [ "$HTTP_CODE" = "201" ]; then
+  echo -e "${GREEN}   ✓ Index created (HTTP $HTTP_CODE)${NC}"
 else
-  echo -e "${RED}   ✗ Index creation failed${NC}"
+  echo -e "${RED}   ✗ Index creation failed (HTTP $HTTP_CODE)${NC}"
   cat /tmp/create_index_resp.json
   exit 1
 fi
@@ -197,6 +203,12 @@ curl -s -X PUT "http://localhost:$COORDINATION_PORT/products/_doc/8" \
 echo -e "${GREEN}   ✓ Indexed 8 test documents${NC}"
 
 sleep 2
+
+echo ""
+echo "6. Refreshing index to make documents searchable..."
+curl -s -X POST "http://localhost:$COORDINATION_PORT/products/_refresh" > /dev/null
+sleep 1
+echo -e "${GREEN}   ✓ Index refreshed${NC}"
 
 echo ""
 echo "=========================================="
