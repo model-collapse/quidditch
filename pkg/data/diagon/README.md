@@ -1,296 +1,87 @@
-# Diagon Bridge - Go ↔ C++ Interface
+# Diagon CGO Bindings
 
-This package provides a Go interface to the Diagon C++ search engine core using CGO.
-
-## Current Status
-
-**Mode**: Stub (In-Memory)
-**CGO**: Disabled (will enable when Diagon C++ core is ready)
-
-The bridge currently operates in **stub mode**, using in-memory Go data structures to simulate Diagon functionality. This allows the rest of the Quidditch system to be developed and tested without waiting for the C++ implementation.
+This package provides Go bindings to the Diagon C++ search engine library via CGO.
 
 ## Architecture
 
+**Diagon Repository** (100% C++):
+- Location: `upstream/` (git submodule to github.com/model-collapse/diagon)
+- Contains: C++ implementation + C API
+- C API headers: `upstream/src/core/include/diagon/c_api/`
+- Built library: `upstream/build/src/core/libdiagon_core.so`
+
+**Quidditch Repository** (Go + CGO):
+- Go bindings: `*.go` files in this directory
+- CGO configuration: Imports C API from `upstream/src/core/include/`
+- No C++ bridge code (all C API in Diagon upstream)
+
+## Directory Structure
+
 ```
-┌─────────────────────────────────────────┐
-│   Go Data Node (pkg/data/data.go)      │
-├─────────────────────────────────────────┤
-│   Shard Manager (pkg/data/shard.go)    │
-├─────────────────────────────────────────┤
-│   Diagon Bridge (this package)          │
-│   ┌──────────────────────────────────┐  │
-│   │  Go Wrapper (bridge.go)          │  │
-│   ├──────────────────────────────────┤  │
-│   │  CGO Bindings (commented out)    │  │
-│   ├──────────────────────────────────┤  │
-│   │  C API (diagon.h) - TODO         │  │
-│   └──────────────────────────────────┘  │
-├─────────────────────────────────────────┤
-│   Diagon C++ Core (../../diagon/)      │
-│   • Inverted Index                      │
-│   • Forward Index (Columnar)            │
-│   • SIMD BM25 Scoring                   │
-│   • Compression (LZ4, ZSTD)             │
-└─────────────────────────────────────────┘
-```
+pkg/data/diagon/
+├── README.md              # This file
+├── upstream/              # Git submodule → github.com/model-collapse/diagon
+│   └── src/core/
+│       ├── include/diagon/c_api/
+│       │   └── diagon_c_api.h       # Main C API
+│       └── build/src/core/
+│           └── libdiagon_core.so    # Built library
+├── analysis.go            # Go wrapper for text analysis
+├── analysis_test.go       # Tests for analysis
+├── analyzer_settings.go   # Analyzer configuration
+├── bridge.go              # Main Go-to-C++ bridge
+├── bridge_test.go         # Bridge tests
+└── shard.go               # Shard management
 
-## Files
-
-- **bridge.go** - Main CGO bridge with C API declarations
-- **README.md** - This file
-
-## Stub Mode (Current)
-
-In stub mode, the bridge:
-- ✅ Implements all required interfaces
-- ✅ Stores documents in memory (Go maps)
-- ✅ Returns mock search results
-- ✅ Logs all operations
-- ⚠️ Does NOT persist to disk
-- ⚠️ Does NOT perform real search
-- ⚠️ Does NOT use SIMD
-
-**Use Case**: Development and testing of the distributed layer without C++
-
-## Enabling CGO (Future)
-
-When the Diagon C++ core is ready:
-
-### Step 1: Implement C API
-
-Create `diagon/include/diagon.h`:
-
-```c
-#ifndef DIAGON_H
-#define DIAGON_H
-
-#ifdef __cplusplus
-extern "C" {
-#endif
-
-// Engine management
-typedef struct diagon_engine diagon_engine_t;
-diagon_engine_t* diagon_create_engine(const char* data_dir, int simd_enabled);
-void diagon_destroy_engine(diagon_engine_t* engine);
-
-// Shard management
-typedef struct diagon_shard diagon_shard_t;
-diagon_shard_t* diagon_create_shard(diagon_engine_t* engine, const char* path);
-void diagon_destroy_shard(diagon_shard_t* shard);
-
-// Document operations
-int diagon_index_document(diagon_shard_t* shard, const char* doc_id, const char* doc_json);
-char* diagon_get_document(diagon_shard_t* shard, const char* doc_id);
-int diagon_delete_document(diagon_shard_t* shard, const char* doc_id);
-
-// Search operations
-char* diagon_search(diagon_shard_t* shard, const char* query_json);
-
-// Maintenance operations
-int diagon_refresh(diagon_shard_t* shard);
-int diagon_flush(diagon_shard_t* shard);
-
-#ifdef __cplusplus
-}
-#endif
-
-#endif // DIAGON_H
+NO C++ CODE IN QUIDDITCH - All C++ code is in Diagon upstream
 ```
 
-### Step 2: Build C++ Library
+## Building
+
+The C++ library is built via CMake in the Diagon submodule:
 
 ```bash
-cd diagon
-mkdir build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make
-# This produces libdiagon.so (Linux) or libdiagon.dylib (macOS)
+cd upstream
+cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
+cmake --build build -j$(nproc)
 ```
 
-### Step 3: Enable CGO in bridge.go
-
-1. Uncomment the `#include "diagon.h"` line
-2. Set `cgoEnabled: true` in `NewDiagonBridge()`
-3. Uncomment all C function calls in the methods
-4. Remove stub implementations
-
-### Step 4: Build Go with CGO
+The Go bindings automatically link against the built library:
 
 ```bash
-# Ensure CGO is enabled
-export CGO_ENABLED=1
-
-# Set library path
-export LD_LIBRARY_PATH=$PWD/diagon/lib:$LD_LIBRARY_PATH
-
-# Build
-go build -tags cgo ./cmd/data
+go build ./cmd/data
 ```
 
-## API Reference
-
-### DiagonBridge
-
-Main interface to the Diagon engine.
-
+CGO configuration is in `bridge.go`:
 ```go
-bridge, err := diagon.NewDiagonBridge(&diagon.Config{
-    DataDir:     "/var/lib/quidditch/data",
-    SIMDEnabled: true,
-    Logger:      logger,
-})
-
-err = bridge.Start()
-defer bridge.Stop()
+/*
+#cgo CFLAGS: -I${SRCDIR}/upstream/src/core/include
+#cgo LDFLAGS: -L${SRCDIR}/upstream/build/src/core -ldiagon_core ...
+#include "diagon/c_api/diagon_c_api.h"
+*/
 ```
 
-### Shard
+## Design Principles
 
-Represents a single shard (index partition).
+1. **No C++ in Quidditch**: All C++ code belongs in Diagon upstream
+2. **C API Boundary**: Go never calls C++ directly, always via C API
+3. **Minimal Bridge**: Keep Go bindings thin - just type conversion
+4. **Proper Layering**: Diagon = library, Quidditch = application
 
-```go
-shard, err := bridge.CreateShard("/path/to/shard")
+## Migration History
 
-// Index document
-err = shard.IndexDocument("doc1", map[string]interface{}{
-    "title": "Quidditch Search Engine",
-    "content": "Fast and distributed",
-})
+**January 27, 2026**: Completed architecture cleanup
+- Moved `diagon_c_api.{h,cpp}` from Quidditch to Diagon upstream
+- Moved `MatchAllQuery` to Diagon core
+- Removed obsolete stub implementations (`minimal_wrapper`)
+- Removed `c_api_src/` directory (empty after cleanup)
+- Bridge layer reduced from 2,263 lines to 0 lines (100% reduction)
+- All C API functionality now properly in Diagon library
 
-// Search
-results, err := shard.Search([]byte(`{"query": {"match": {"title": "search"}}}`))
+**Result**: Clean separation - Diagon = 100% C++, Quidditch = Go + CGO bindings
 
-// Get document
-doc, err := shard.GetDocument("doc1")
+## See Also
 
-// Delete document
-err = shard.DeleteDocument("doc1")
-
-// Maintenance
-err = shard.Refresh() // Make changes visible
-err = shard.Flush()   // Persist to disk
-err = shard.Close()   // Close shard
-```
-
-## Performance Considerations
-
-### Memory Management
-
-- C++ allocates memory for documents and search results
-- Go must free C-allocated memory using `C.free()`
-- Use `defer C.free()` immediately after C calls
-
-### String Conversion
-
-- Go strings → C strings: `C.CString()` (allocates)
-- C strings → Go strings: `C.GoString()` (copies)
-- Always free C strings with `C.free()`
-
-### Concurrency
-
-- CGO calls are NOT goroutine-safe by default
-- Use mutexes around C++ calls
-- Consider thread-local storage in C++ if needed
-
-## Testing
-
-### Stub Mode Testing
-
-```go
-// No CGO required - runs everywhere
-go test ./pkg/data/diagon
-```
-
-### CGO Mode Testing
-
-```go
-// Requires C++ library
-CGO_ENABLED=1 go test ./pkg/data/diagon
-```
-
-## Debugging
-
-### Enable CGO Debug
-
-```bash
-export CGO_CFLAGS="-g -O0"
-export CGO_LDFLAGS="-g"
-go build -gcflags="all=-N -l" ./cmd/data
-```
-
-### GDB Debugging
-
-```bash
-gdb ./bin/quidditch-data
-(gdb) break diagon_search
-(gdb) run --config config/dev-data.yaml
-```
-
-### Valgrind Memory Check
-
-```bash
-CGO_ENABLED=1 go build -buildmode=c-shared ./cmd/data
-valgrind --leak-check=full ./bin/quidditch-data
-```
-
-## Error Handling
-
-### C++ Exceptions
-
-C++ exceptions CANNOT cross the CGO boundary. The C API must:
-1. Catch all C++ exceptions
-2. Convert to error codes
-3. Return NULL on failure
-
-Example:
-```cpp
-extern "C" diagon_shard_t* diagon_create_shard(diagon_engine_t* engine, const char* path) {
-    try {
-        return reinterpret_cast<diagon_shard_t*>(
-            new DiagonShard(engine, path)
-        );
-    } catch (const std::exception& e) {
-        // Log error
-        return nullptr;
-    }
-}
-```
-
-## Performance Targets
-
-With Diagon C++ core:
-- **Indexing**: 100k docs/sec/node
-- **Query Latency**: <10ms p99 (term queries)
-- **Memory**: 40-70% less than Lucene (compression)
-- **SIMD Speedup**: 4-8× (BM25 scoring)
-
-## Resources
-
-- [CGO Documentation](https://golang.org/cmd/cgo/)
-- [Diagon Architecture](../../../design/QUIDDITCH_ARCHITECTURE.md)
-- [C++ Best Practices for CGO](https://github.com/golang/go/wiki/cgo)
-
-## Status Checklist
-
-- [x] Go interface defined
-- [x] Stub implementation working
-- [ ] C API header defined
-- [ ] C++ implementation complete
-- [ ] CGO bindings tested
-- [ ] Performance benchmarks
-- [ ] Memory leak testing
-- [ ] Production deployment
-
-## Next Steps
-
-1. Complete Diagon C++ core (Phase 0)
-2. Implement C API wrapper
-3. Enable CGO in bridge.go
-4. Run integration tests
-5. Performance benchmarking
-
----
-
-**Last Updated**: 2026-01-25
-**Status**: Stub Mode (CGO Disabled)
+- [Repository Architecture](../../../REPOSITORY_ARCHITECTURE.md) - Defines boundaries between Diagon and Quidditch
+- [Architecture Cleanup Plan](../../../ARCHITECTURE_CLEANUP_PLAN.md) - Migration plan executed
+- [Diagon README](upstream/README.md) - Upstream library documentation

@@ -1,10 +1,10 @@
 package diagon
 
 /*
-#cgo CFLAGS: -I${SRCDIR}/c_api_src
+#cgo CFLAGS: -I${SRCDIR}/upstream/src/core/include
 #cgo LDFLAGS: -L${SRCDIR}/build -ldiagon -L${SRCDIR}/upstream/build/src/core -ldiagon_core -lz -lzstd -llz4 -Wl,-rpath,${SRCDIR}/build -Wl,-rpath,${SRCDIR}/upstream/build/src/core
 #include <stdlib.h>
-#include "diagon_c_api.h"
+#include "diagon/c_api/diagon_c_api.h"
 */
 import "C"
 
