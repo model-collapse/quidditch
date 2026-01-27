@@ -121,6 +121,10 @@ func NewCoordinationNode(cfg *config.CoordinationConfig, logger *zap.Logger) (*C
 	pipelineExecutor := pipeline.NewExecutor(pipelineRegistry, logger)
 	logger.Info("Pipeline framework initialized successfully")
 
+	// Connect pipelines to query service
+	queryService.SetPipelineComponents(pipelineRegistry, pipelineExecutor)
+	logger.Info("Query service pipeline integration enabled")
+
 	node := &CoordinationNode{
 		cfg:              cfg,
 		logger:           logger,
@@ -810,6 +814,19 @@ func (c *CoordinationNode) handleIndexDocument(ctx *gin.Context) {
 		return
 	}
 
+	// Execute document pipeline if configured
+	if c.pipelineRegistry != nil && c.pipelineExecutor != nil {
+		modifiedDoc, err := c.executeDocumentPipeline(ctx.Request.Context(), indexName, docID, document)
+		if err != nil {
+			c.logger.Warn("Document pipeline failed, continuing with original document",
+				zap.String("index", indexName),
+				zap.String("doc_id", docID),
+				zap.Error(err))
+		} else if modifiedDoc != nil {
+			document = modifiedDoc
+		}
+	}
+
 	c.logger.Debug("About to call RouteIndexDocument",
 		zap.String("index", indexName),
 		zap.String("doc_id", docID))
@@ -932,6 +949,54 @@ func (c *CoordinationNode) handleDeleteDocument(ctx *gin.Context) {
 		"found":  resp.Found,
 		// TODO: Add version and shard information once proto is updated
 	})
+}
+
+// executeDocumentPipeline executes the document pipeline for an index if configured
+func (c *CoordinationNode) executeDocumentPipeline(ctx context.Context, indexName string, docID string, document map[string]interface{}) (map[string]interface{}, error) {
+	// Get document pipeline for this index
+	pipe, err := c.pipelineRegistry.GetPipelineForIndex(indexName, pipeline.PipelineTypeDocument)
+	if err != nil {
+		// No document pipeline configured
+		return nil, nil
+	}
+
+	c.logger.Debug("Executing document pipeline",
+		zap.String("index", indexName),
+		zap.String("doc_id", docID),
+		zap.String("pipeline", pipe.Name()))
+
+	// Prepare input data
+	input := map[string]interface{}{
+		"document": document,
+		"metadata": map[string]interface{}{
+			"index":  indexName,
+			"doc_id": docID,
+		},
+	}
+
+	// Execute pipeline
+	output, err := pipe.Execute(ctx, input)
+	if err != nil {
+		return nil, fmt.Errorf("document pipeline execution failed: %w", err)
+	}
+
+	// Extract modified document
+	outputMap, ok := output.(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("document pipeline output is not a map")
+	}
+
+	modifiedDoc, ok := outputMap["document"].(map[string]interface{})
+	if !ok {
+		return nil, fmt.Errorf("document pipeline output missing 'document' field")
+	}
+
+	c.logger.Debug("Document pipeline executed successfully",
+		zap.String("index", indexName),
+		zap.String("doc_id", docID),
+		zap.String("pipeline", pipe.Name()))
+
+	return modifiedDoc, nil
 }
 
 func (c *CoordinationNode) handleUpdateDocument(ctx *gin.Context) {
