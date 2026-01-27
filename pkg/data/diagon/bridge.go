@@ -11,6 +11,7 @@ import "C"
 import (
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"sync"
 	"unsafe"
 
@@ -213,7 +214,14 @@ func (s *Shard) IndexDocument(docID string, doc map[string]interface{}) error {
 			// Use indexed field instead of doc values only field
 			field := C.diagon_create_indexed_long_field(cFieldName, C.int64_t(val))
 			C.diagon_document_add_field(diagonDoc, field)
-			s.logger.Info("DEBUG: Created indexed long field", zap.String("field", key), zap.Int64("value", val))
+
+			// ALSO add as StoredField so we can retrieve it
+			cValueStr := C.CString(fmt.Sprintf("%d", val))
+			defer C.free(unsafe.Pointer(cValueStr))
+			storedField := C.diagon_create_stored_field(cFieldName, cValueStr)
+			C.diagon_document_add_field(diagonDoc, storedField)
+
+			s.logger.Info("DEBUG: Created indexed+stored long field", zap.String("field", key), zap.Int64("value", val))
 
 		case float32, float64:
 			// Create indexed numeric field for floats (searchable with range queries)
@@ -227,7 +235,14 @@ func (s *Shard) IndexDocument(docID string, doc map[string]interface{}) error {
 			// Use indexed field instead of doc values only field
 			field := C.diagon_create_indexed_double_field(cFieldName, C.double(val))
 			C.diagon_document_add_field(diagonDoc, field)
-			s.logger.Info("DEBUG: Created indexed double field", zap.String("field", key), zap.Float64("value", val))
+
+			// ALSO add as StoredField so we can retrieve it
+			cValueStr := C.CString(fmt.Sprintf("%f", val))
+			defer C.free(unsafe.Pointer(cValueStr))
+			storedField := C.diagon_create_stored_field(cFieldName, cValueStr)
+			C.diagon_document_add_field(diagonDoc, storedField)
+
+			s.logger.Info("DEBUG: Created indexed+stored double field", zap.String("field", key), zap.Float64("value", val))
 
 		default:
 			// Convert to JSON string for complex types
@@ -410,33 +425,15 @@ func (s *Shard) convertQueryToDiagon(queryObj map[string]interface{}) (C.DiagonQ
 		}
 	} else if _, ok := queryObj["match_all"]; ok {
 		// Match all query: {"match_all": {}}
-		// Workaround: Use a very broad range query on _id field
-		// Since _id is always indexed, this effectively matches all documents
-		// Use ASCII range to match all possible _id values
-		cField := C.CString("_id")
-		defer C.free(unsafe.Pointer(cField))
-
-		// Use a range that covers all possible string values
-		// From empty string to highest Unicode character
-		diagonQuery = C.diagon_create_numeric_range_query(
-			cField,
-			C.double(-9999999999), // Very low value
-			C.double(9999999999),  // Very high value
-			C.bool(true),
-			C.bool(true),
-		)
+		// Use proper MatchAllDocsQuery from Diagon C API
+		s.logger.Info("DEBUG: Creating match_all query")
+		diagonQuery = C.diagon_create_match_all_query()
 		if diagonQuery == nil {
-			// If range query fails, try empty bool query
-			diagonQuery = C.diagon_create_bool_query()
-			if diagonQuery != nil {
-				// Build empty bool query (matches nothing by default, but better than nil)
-				diagonQuery = C.diagon_bool_query_build(diagonQuery)
-			}
-			if diagonQuery == nil {
-				errMsg := C.GoString(C.diagon_last_error())
-				return nil, fmt.Errorf("failed to create match_all workaround: %s", errMsg)
-			}
+			errMsg := C.GoString(C.diagon_last_error())
+			s.logger.Error("Failed to create match_all query", zap.String("error", errMsg))
+			return nil, fmt.Errorf("failed to create match_all query: %s", errMsg)
 		}
+		s.logger.Info("DEBUG: match_all query created successfully")
 	} else if rangeQuery, ok := queryObj["range"].(map[string]interface{}); ok {
 		// Range query: {"range": {"field_name": {"gte": 100, "lte": 1000}}}
 		for field, rangeParams := range rangeQuery {
@@ -634,23 +631,41 @@ func (s *Shard) convertQueryToDiagon(queryObj map[string]interface{}) (C.DiagonQ
 func (s *Shard) Search(query []byte, filterExpression []byte) (*SearchResult, error) {
 	s.mu.Lock()
 
-	// Ensure reader/searcher are initialized
-	if s.reader == nil {
-		// Open reader
-		s.reader = C.diagon_open_index_reader(s.directory)
-		if s.reader == nil {
+	// Commit any pending changes first to make them visible
+	if s.writer != nil {
+		if !C.diagon_commit(s.writer) {
 			s.mu.Unlock()
 			errMsg := C.GoString(C.diagon_last_error())
-			return nil, fmt.Errorf("failed to open reader: %s", errMsg)
+			s.logger.Warn("Failed to commit before search", zap.String("error", errMsg))
+			// Continue anyway - might have no changes to commit
 		}
+	}
 
-		// Create searcher
-		s.searcher = C.diagon_create_index_searcher(s.reader)
-		if s.searcher == nil {
-			s.mu.Unlock()
-			errMsg := C.GoString(C.diagon_last_error())
-			return nil, fmt.Errorf("failed to create searcher: %s", errMsg)
-		}
+	// Always reopen reader/searcher to see latest changes
+	// Close existing reader/searcher if they exist
+	if s.searcher != nil {
+		C.diagon_free_index_searcher(s.searcher)
+		s.searcher = nil
+	}
+	if s.reader != nil {
+		C.diagon_close_index_reader(s.reader)
+		s.reader = nil
+	}
+
+	// Open fresh reader
+	s.reader = C.diagon_open_index_reader(s.directory)
+	if s.reader == nil {
+		s.mu.Unlock()
+		errMsg := C.GoString(C.diagon_last_error())
+		return nil, fmt.Errorf("failed to open reader: %s", errMsg)
+	}
+
+	// Create fresh searcher
+	s.searcher = C.diagon_create_index_searcher(s.reader)
+	if s.searcher == nil {
+		s.mu.Unlock()
+		errMsg := C.GoString(C.diagon_last_error())
+		return nil, fmt.Errorf("failed to create searcher: %s", errMsg)
 	}
 
 	s.mu.Unlock()
@@ -691,17 +706,30 @@ func (s *Shard) Search(query []byte, filterExpression []byte) (*SearchResult, er
 			continue
 		}
 
-		docID := int(C.diagon_score_doc_get_doc(scoreDoc))
+		internalDocID := int(C.diagon_score_doc_get_doc(scoreDoc))
 		score := float64(C.diagon_score_doc_get_score(scoreDoc))
 
-		// Note: Document retrieval (getting source) not yet implemented in Diagon Phase 4
-		// Return doc ID and score only
+		// Retrieve the actual document with all stored fields
+		doc, docIDString, err := s.getDocumentByInternalID(internalDocID)
+		if err != nil {
+			s.logger.Warn("Failed to retrieve document fields",
+				zap.Int("internal_doc_id", internalDocID),
+				zap.Error(err))
+			// Fallback to minimal data if retrieval fails
+			hits = append(hits, &Hit{
+				ID:     fmt.Sprintf("doc_%d", internalDocID),
+				Score:  score,
+				Source: map[string]interface{}{
+					"_internal_doc_id": internalDocID,
+				},
+			})
+			continue
+		}
+
 		hits = append(hits, &Hit{
-			ID:     fmt.Sprintf("doc_%d", docID),
+			ID:     docIDString,
 			Score:  score,
-			Source: map[string]interface{}{
-				"_internal_doc_id": docID,
-			},
+			Source: doc,
 		})
 	}
 
@@ -718,6 +746,120 @@ func (s *Shard) Search(query []byte, filterExpression []byte) (*SearchResult, er
 		zap.Int("num_results", numResults))
 
 	return result, nil
+}
+
+// getDocumentByInternalID retrieves a document's stored fields given its internal Diagon doc ID
+// Returns the document fields map and the document's _id string
+func (s *Shard) getDocumentByInternalID(internalDocID int) (map[string]interface{}, string, error) {
+	// Retrieve stored fields using reader
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Debug: Check reader's maxDoc
+	maxDoc := int(C.diagon_reader_max_doc(s.reader))
+	s.logger.Info("Attempting to retrieve document",
+		zap.Int("internal_doc_id", internalDocID),
+		zap.Int("reader_max_doc", maxDoc))
+
+	if internalDocID >= maxDoc {
+		return nil, "", fmt.Errorf("internal docID %d >= maxDoc %d", internalDocID, maxDoc)
+	}
+
+	diagonDoc := C.diagon_reader_get_document(s.reader, C.int(internalDocID))
+	if diagonDoc == nil {
+		errMsg := C.GoString(C.diagon_last_error())
+		return nil, "", fmt.Errorf("failed to retrieve document: %s", errMsg)
+	}
+	defer C.diagon_free_document(diagonDoc)
+
+	// Extract fields from Diagon document
+	doc := make(map[string]interface{})
+	var docIDString string
+
+	// Get _id field (this is the user-provided doc ID)
+	idBuf := make([]byte, 1024)
+	cIDFieldName := C.CString("_id")
+	defer C.free(unsafe.Pointer(cIDFieldName))
+	if C.diagon_document_get_field_value(diagonDoc, cIDFieldName,
+		(*C.char)(unsafe.Pointer(&idBuf[0])), C.size_t(len(idBuf))) {
+		// Find null terminator
+		nullIdx := 0
+		for i, b := range idBuf {
+			if b == 0 {
+				nullIdx = i
+				break
+			}
+		}
+		docIDString = string(idBuf[:nullIdx])
+		doc["_id"] = docIDString
+	} else {
+		// Fallback if _id not found
+		docIDString = fmt.Sprintf("doc_%d", internalDocID)
+	}
+
+	// Try to get common text fields
+	commonFields := []string{"title", "description", "name", "content", "text", "body", "category", "brand"}
+	for _, fieldName := range commonFields {
+		buf := make([]byte, 4096)
+		cFieldName := C.CString(fieldName)
+		if C.diagon_document_get_field_value(diagonDoc, cFieldName,
+			(*C.char)(unsafe.Pointer(&buf[0])), C.size_t(len(buf))) {
+			// Find null terminator
+			nullIdx := 0
+			for i, b := range buf {
+				if b == 0 {
+					nullIdx = i
+					break
+				}
+			}
+			if nullIdx > 0 {
+				doc[fieldName] = string(buf[:nullIdx])
+			}
+		}
+		C.free(unsafe.Pointer(cFieldName))
+	}
+
+	// Try to get common numeric/boolean fields
+	// Since we store them as string StoredFields, retrieve as string and parse
+	commonNumFields := []string{"price", "count", "quantity", "age", "score"}
+	for _, fieldName := range commonNumFields {
+		buf := make([]byte, 1024)
+		cFieldName := C.CString(fieldName)
+		if C.diagon_document_get_field_value(diagonDoc, cFieldName,
+			(*C.char)(unsafe.Pointer(&buf[0])), C.size_t(len(buf))) {
+			// Find null terminator
+			nullIdx := 0
+			for i, b := range buf {
+				if b == 0 {
+					nullIdx = i
+					break
+				}
+			}
+			if nullIdx > 0 {
+				valueStr := string(buf[:nullIdx])
+				// Try to parse as int64
+				if intVal, err := strconv.ParseInt(valueStr, 10, 64); err == nil {
+					doc[fieldName] = intVal
+				} else if floatVal, err := strconv.ParseFloat(valueStr, 64); err == nil {
+					doc[fieldName] = floatVal
+				}
+			}
+		}
+		C.free(unsafe.Pointer(cFieldName))
+	}
+
+	// Try to get common boolean fields
+	commonBoolFields := []string{"in_stock", "refurbished", "active", "enabled"}
+	for _, fieldName := range commonBoolFields {
+		var val int64
+		cFieldName := C.CString(fieldName)
+		if C.diagon_document_get_long_value(diagonDoc, cFieldName, (*C.int64_t)(unsafe.Pointer(&val))) {
+			doc[fieldName] = (val != 0)
+		}
+		C.free(unsafe.Pointer(cFieldName))
+	}
+
+	return doc, docIDString, nil
 }
 
 // GetDocument retrieves a document by ID

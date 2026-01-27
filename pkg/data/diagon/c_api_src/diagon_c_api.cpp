@@ -549,24 +549,117 @@ DiagonQuery diagon_create_term_query(DiagonTerm term) {
 }
 
 // MatchAllQuery implementation
-// Creates a BooleanQuery with no clauses, which matches all documents
+// Since Diagon doesn't have a dedicated MatchAllDocsQuery class, we implement it here
+// using a custom Query that matches all documents by returning a Scorer that iterates
+// through all doc IDs from 0 to maxDoc-1
+
+namespace {
+    // Forward declaration
+    class MatchAllDocsQuery;
+
+    // MatchAllWeight implementation
+    class MatchAllWeight : public diagon::search::Weight {
+    private:
+        std::unique_ptr<diagon::search::Query> query_;
+        float boost_;
+
+    public:
+        MatchAllWeight(std::unique_ptr<diagon::search::Query> query, float boost)
+            : query_(std::move(query)), boost_(boost) {}
+
+        std::unique_ptr<diagon::search::Scorer> scorer(
+            const diagon::index::LeafReaderContext& context) const override;
+
+        bool isCacheable(const diagon::index::LeafReaderContext& context) const override {
+            return true;
+        }
+
+        const diagon::search::Query& getQuery() const override {
+            return *query_;
+        }
+    };
+
+    // MatchAllScorer implementation
+    class MatchAllScorer : public diagon::search::Scorer {
+    private:
+        int32_t doc_;
+        int32_t maxDoc_;
+        float score_;
+        const MatchAllWeight* weight_;
+
+    public:
+        MatchAllScorer(const MatchAllWeight* weight, int32_t maxDoc, float score)
+            : doc_(-1), maxDoc_(maxDoc), score_(score), weight_(weight) {}
+
+        int32_t docID() const override { return doc_; }
+
+        int32_t nextDoc() override {
+            doc_++;
+            if (doc_ >= maxDoc_) {
+                doc_ = diagon::search::DocIdSetIterator::NO_MORE_DOCS;
+            }
+            return doc_;
+        }
+
+        int32_t advance(int32_t target) override {
+            doc_ = target;
+            if (doc_ >= maxDoc_) {
+                doc_ = diagon::search::DocIdSetIterator::NO_MORE_DOCS;
+            }
+            return doc_;
+        }
+
+        float score() const override { return score_; }
+
+        int64_t cost() const override { return maxDoc_; }
+
+        const diagon::search::Weight& getWeight() const override {
+            return *weight_;
+        }
+    };
+
+    // Simple MatchAllDocsQuery implementation
+    class MatchAllDocsQuery : public diagon::search::Query {
+    public:
+        std::unique_ptr<diagon::search::Weight> createWeight(
+            diagon::search::IndexSearcher& searcher,
+            diagon::search::ScoreMode scoreMode,
+            float boost) const override {
+            // Clone the query for the weight
+            auto queryClone = this->clone();
+            return std::make_unique<MatchAllWeight>(std::move(queryClone), boost);
+        }
+
+        std::string toString(const std::string& field) const override {
+            return "*:*";
+        }
+
+        bool equals(const diagon::search::Query& other) const override {
+            // All MatchAllDocsQuery instances are equal
+            return dynamic_cast<const MatchAllDocsQuery*>(&other) != nullptr;
+        }
+
+        size_t hashCode() const override {
+            // Constant hash for all MatchAllDocsQuery instances
+            return 0x12345678;
+        }
+
+        std::unique_ptr<diagon::search::Query> clone() const override {
+            return std::make_unique<MatchAllDocsQuery>();
+        }
+    };
+
+    // Define scorer method after MatchAllDocsQuery is complete
+    std::unique_ptr<diagon::search::Scorer> MatchAllWeight::scorer(
+        const diagon::index::LeafReaderContext& context) const {
+        int32_t maxDoc = context.reader->maxDoc();
+        return std::make_unique<MatchAllScorer>(this, maxDoc, boost_);
+    }
+}
+
 DiagonQuery diagon_create_match_all_query() {
     try {
-        // Create an empty BooleanQuery builder
-        auto builder = std::make_unique<diagon::search::BooleanQuery::Builder>();
-
-        // Build without adding any clauses
-        // In Lucene/Diagon, an empty BooleanQuery with no clauses defaults to matching nothing
-        // So we need to add a SHOULD clause that's always true
-        // Workaround: Use a very broad numeric range query that matches all documents
-
-        // Use range on _id field (all docs have _id as StringField)
-        // Actually, better to use a field that always exists
-        // Since we can't guarantee which fields exist, use the builder approach
-
-        // Build the query - empty bool query
-        auto query = builder->build();
-
+        auto query = std::make_unique<MatchAllDocsQuery>();
         return query.release();
     } catch (const std::exception& e) {
         set_error(e);
@@ -892,15 +985,54 @@ DiagonDocument diagon_reader_get_document(DiagonIndexReader reader, int doc_id) 
             return nullptr;
         }
 
-        // Get the first leaf reader
-        diagon::index::LeafReader* leaf_reader = leaves[0].reader;
+        // Find the correct segment containing the global doc_id
+        // Lucene/Diagon use two-level document IDs:
+        // 1. Global ID: 0-based across entire index
+        // 2. Segment-local ID: 0-based within each segment
+        // Each segment has docBase (starting global ID) and maxDoc (document count)
+
+        diagon::index::LeafReader* leaf_reader = nullptr;
+        int segment_local_doc_id = -1;
+        int segment_doc_base = -1;
+
+        fprintf(stderr, "[C API] Finding segment for global doc_id=%d\n", doc_id);
+        fflush(stderr);
+
+        for (const auto& ctx : leaves) {
+            int maxDoc = ctx.reader->maxDoc();
+            int docBase = ctx.docBase;
+
+            fprintf(stderr, "[C API] Checking segment ord=%d, docBase=%d, maxDoc=%d, range=[%d, %d)\n",
+                    ctx.ord, docBase, maxDoc, docBase, docBase + maxDoc);
+            fflush(stderr);
+
+            // Check if global doc_id falls within this segment's range
+            if (doc_id >= docBase && doc_id < docBase + maxDoc) {
+                leaf_reader = ctx.reader;
+                segment_doc_base = docBase;
+
+                // Convert global ID to segment-local ID
+                segment_local_doc_id = doc_id - docBase;
+
+                fprintf(stderr, "[C API] Found! Segment ord=%d contains global doc_id=%d (local_id=%d)\n",
+                        ctx.ord, doc_id, segment_local_doc_id);
+                fflush(stderr);
+                break;
+            }
+        }
 
         if (!leaf_reader) {
-            set_error("Failed to get leaf reader");
+            char error_msg[256];
+            snprintf(error_msg, sizeof(error_msg),
+                     "Document ID %d not found in any segment (total segments: %zu)",
+                     doc_id, leaves.size());
+            set_error(error_msg);
+            fprintf(stderr, "[C API] ERROR: %s\n", error_msg);
+            fflush(stderr);
             return nullptr;
         }
 
-        fprintf(stderr, "[C API] Got leaf_reader=%p\n", leaf_reader);
+        fprintf(stderr, "[C API] Got leaf_reader=%p for segment\n", leaf_reader);
         fflush(stderr);
 
         // Get stored fields reader from the leaf reader
@@ -918,10 +1050,11 @@ DiagonDocument diagon_reader_get_document(DiagonIndexReader reader, int doc_id) 
             return nullptr;
         }
 
-        // Read document fields
-        fprintf(stderr, "[C API] Reading document fields for doc_id=%d\n", doc_id);
+        // Read document fields using SEGMENT-LOCAL doc_id
+        fprintf(stderr, "[C API] Reading document fields for global_doc_id=%d, segment_local_doc_id=%d\n",
+                doc_id, segment_local_doc_id);
         fflush(stderr);
-        auto fields = stored_fields_reader->document(doc_id);
+        auto fields = stored_fields_reader->document(segment_local_doc_id);
         fprintf(stderr, "[C API] Got %zu fields\n", fields.size());
         fflush(stderr);
 
