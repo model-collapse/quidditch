@@ -13,12 +13,16 @@ import (
 	"go.uber.org/zap"
 )
 
-// pipelineImpl implements the Pipeline interface
-type pipelineImpl struct {
+// PipelineImpl implements the Pipeline interface
+// Exported for testing purposes
+type PipelineImpl struct {
 	def    *PipelineDefinition
 	stages []Stage
 	logger *zap.Logger
 }
+
+// Type alias for internal use
+type pipelineImpl = PipelineImpl
 
 // Name returns the pipeline identifier
 func (p *pipelineImpl) Name() string {
