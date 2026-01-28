@@ -1,4 +1,5 @@
-# Quidditch: Distributed Search Engine
+# QUIDDITCH
+**Qu**ery and **I**ndex **D**istributed **D**ata **I**nfrastructure with **T**ext search, **C**lustering, and **H**igh-performance computing
 
 **OpenSearch-Compatible | Diagon-Powered | Cloud-Native**
 
@@ -8,11 +9,11 @@
 
 ---
 
-## What is Quidditch?
+## What is QUIDDITCH?
 
-Quidditch is a **distributed, cloud-native search engine** that provides 100% OpenSearch API compatibility while leveraging the high-performance [Diagon](https://github.com/model-collapse/diagon) search engine core.
+QUIDDITCH is a **distributed, cloud-native search engine** that provides 100% OpenSearch API compatibility while leveraging the high-performance [Diagon](https://github.com/model-collapse/diagon) search engine core.
 
-**Just like Quidditch players work together across the field, Quidditch nodes collaborate to deliver fast, scalable search.**
+**The name QUIDDITCH represents our core capabilities: Query and Index Distributed Data Infrastructure with Text search, Clustering, and High-performance computing. Just like the fast-paced sport, QUIDDITCH delivers speed and coordination across distributed nodes.**
 
 ### Key Features
 
@@ -722,6 +723,25 @@ ls -la *.md
 
 ---
 
+## Name Explanation
+
+**QUIDDITCH** is a backronym that captures our core capabilities:
+
+- **Qu**ery - Query execution and planning
+- **I**ndex - Document indexing and storage
+- **D**istributed - Distributed cluster architecture
+- **D**ata - Data management and processing
+- **I**nfrastructure - Complete search infrastructure
+- **T**ext - Full-text search capabilities
+- **C**lustering - Distributed node coordination
+- **H**igh-performance - SIMD acceleration, C++ core
+
+The name reflects both the technical capabilities and the collaborative nature of the system - just like players working together in the fast-paced sport, QUIDDITCH nodes coordinate to deliver high-performance search.
+
+See [PROJECT_NAME.md](PROJECT_NAME.md) for detailed naming rationale.
+
+---
+
 ## License
 
 Apache License 2.0 - See [LICENSE](LICENSE) for details.
@@ -730,7 +750,7 @@ Apache License 2.0 - See [LICENSE](LICENSE) for details.
 
 ## Acknowledgments
 
-Quidditch is built upon the foundational work of:
+QUIDDITCH is built upon the foundational work of:
 
 - **[Apache Lucene](https://lucene.apache.org/)** - Inverted index design
 - **[ClickHouse](https://clickhouse.com/)** - Columnar storage architecture
