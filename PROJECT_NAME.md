@@ -2,7 +2,7 @@
 
 ## Full Name
 
-**QUIDDITCH** - **Qu**ery and **I**ndex **D**istributed **D**ata **I**nfrastructure with **T**ext search, **C**lustering, and **H**igh-performance computing
+**QUIDDITCH** - **Qu**ery and **I**ndex **D**istributed **D**ata **I**nfrastructure with **T**ext search, **C**loud-native, and **H**igh-performance computing
 
 ---
 
@@ -16,7 +16,7 @@
 | **D** | **D**ata | Data management and processing |
 | **I** | **I**nfrastructure | Complete search infrastructure |
 | **T** | **T**ext | Full-text search capabilities |
-| **C** | **C**lustering | Distributed node coordination |
+| **C** | **C**loud-native | Kubernetes deployment, container-first |
 | **H** | **H**igh-performance | SIMD acceleration, C++ core |
 
 ---
@@ -28,27 +28,27 @@ The name **QUIDDITCH** captures the core capabilities of the project:
 1. **Query and Index** - The two fundamental operations of any search engine
 2. **Distributed Data Infrastructure** - Emphasizes the distributed, scalable architecture
 3. **Text search** - Core feature: full-text search with BM25 ranking
-4. **Clustering** - Raft-based consensus and node coordination
+4. **Cloud-native** - Kubernetes-first deployment, containerized architecture
 5. **High-performance** - Diagon C++ core with SIMD acceleration
 
 ---
 
 ## Elevator Pitch
 
-> **QUIDDITCH** is a distributed search engine that provides OpenSearch API compatibility while leveraging a high-performance C++ core (Diagon) for indexing and query execution. It features a distributed cluster architecture with specialized node types, Python-first pipeline framework, and PPL query language support.
+> **QUIDDITCH** is a cloud-native distributed search engine that provides OpenSearch API compatibility while leveraging a high-performance C++ core (Diagon) for indexing and query execution. It features Kubernetes-native deployment, Python-first pipeline framework, and PPL query language support.
 
 ---
 
 ## Alternative Explanations
 
 ### Short Version
-**QUIDDITCH** - A distributed search infrastructure for high-performance text indexing and querying.
+**QUIDDITCH** - A cloud-native distributed search infrastructure for high-performance text indexing and querying.
 
 ### Technical Version
-**QUIDDITCH** - Query and Index Distributed Data Infrastructure with Text search, Clustering, and High-performance computing. A distributed search engine providing 100% OpenSearch API compatibility with a SIMD-accelerated C++ core.
+**QUIDDITCH** - Query and Index Distributed Data Infrastructure with Text search, Cloud-native, and High-performance computing. A Kubernetes-native distributed search engine providing 100% OpenSearch API compatibility with a SIMD-accelerated C++ core.
 
 ### Marketing Version
-**QUIDDITCH** - The next-generation search infrastructure that combines the flexibility of OpenSearch with the raw performance of C++. Built for scale, designed for speed.
+**QUIDDITCH** - The next-generation cloud-native search infrastructure that combines the flexibility of OpenSearch with the raw performance of C++. Built for Kubernetes, designed for speed.
 
 ---
 

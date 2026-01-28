@@ -1,5 +1,5 @@
 # QUIDDITCH
-**Qu**ery and **I**ndex **D**istributed **D**ata **I**nfrastructure with **T**ext search, **C**lustering, and **H**igh-performance computing
+**Qu**ery and **I**ndex **D**istributed **D**ata **I**nfrastructure with **T**ext search, **C**loud-native, and **H**igh-performance computing
 
 **OpenSearch-Compatible | Diagon-Powered | Cloud-Native**
 
@@ -11,9 +11,9 @@
 
 ## What is QUIDDITCH?
 
-QUIDDITCH is a **distributed, cloud-native search engine** that provides 100% OpenSearch API compatibility while leveraging the high-performance [Diagon](https://github.com/model-collapse/diagon) search engine core.
+QUIDDITCH is a **cloud-native distributed search engine** that provides 100% OpenSearch API compatibility while leveraging the high-performance [Diagon](https://github.com/model-collapse/diagon) search engine core.
 
-**The name QUIDDITCH represents our core capabilities: Query and Index Distributed Data Infrastructure with Text search, Clustering, and High-performance computing. Just like the fast-paced sport, QUIDDITCH delivers speed and coordination across distributed nodes.**
+**The name QUIDDITCH represents our core capabilities: Query and Index Distributed Data Infrastructure with Text search, Cloud-native, and High-performance computing. Just like the fast-paced sport, QUIDDITCH delivers speed and coordination across distributed nodes in Kubernetes environments.**
 
 ### Key Features
 
@@ -733,10 +733,10 @@ ls -la *.md
 - **D**ata - Data management and processing
 - **I**nfrastructure - Complete search infrastructure
 - **T**ext - Full-text search capabilities
-- **C**lustering - Distributed node coordination
+- **C**loud-native - Kubernetes deployment, container-first
 - **H**igh-performance - SIMD acceleration, C++ core
 
-The name reflects both the technical capabilities and the collaborative nature of the system - just like players working together in the fast-paced sport, QUIDDITCH nodes coordinate to deliver high-performance search.
+The name reflects both the technical capabilities and the modern cloud architecture - just like players working together in the fast-paced sport, QUIDDITCH nodes coordinate seamlessly in Kubernetes environments to deliver high-performance search.
 
 See [PROJECT_NAME.md](PROJECT_NAME.md) for detailed naming rationale.
 
