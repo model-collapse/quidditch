@@ -29,7 +29,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH:-amd64} \
     ./cmd/coordination
 
 # Stage 2: Runtime
-FROM alpine:3.19
+FROM alpine:3.23
 
 # Add metadata labels
 LABEL org.opencontainers.image.title="Quidditch Coordination Node"
